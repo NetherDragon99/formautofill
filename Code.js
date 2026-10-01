@@ -45,12 +45,12 @@ javascript:(async function() {
 
         // 4. تحديد نوع النص المنسوخ ووضعه في الخانة المناسبة
         if (clipText.includes('labeling.robot.car')) {
-            fillInput('Gulp', clipText); // بيبحث عن خانة فيها كلمة Gulp
+            fillInput('Gulp link', clipText); // بيبحث عن خانة فيها كلمة Gulp
         } else if (clipText.includes('webviz.robot.car')) {
-            fillInput('webviz', clipText); // بيبحث عن خانة فيها كلمة webviz
+            fillInput('webviz link', clipText); // بيبحث عن خانة فيها كلمة webviz
         } else if (clipText !== "") {
             // لو مش لينك من دول، هيعتبره الـ ID
-            fillInput('road event', clipText); // بيبحث عن خانة فيها كلمة road event
+            fillInput('Road Event', clipText); // بيبحث عن خانة فيها كلمة road event
         }
 
         console.log("تم تنفيذ السكريبت وملء البيانات المتاحة!");
