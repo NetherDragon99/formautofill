@@ -1,61 +1,85 @@
-javascript:(async function() {
+javascript:(function() {
     try {
-        // 1. قراءة آخر نص في الحافظة
-        const clipText = (await navigator.clipboard.readText()).trim();
-        
-        // دالة مساعدة لملء الحقول النصية بناءً على اسم الخانة (عشان الكلاسات بتتغير)
-        function fillInput(labelText, value) {
+        const clipText = prompt("اضغط Ctrl + V للصق اللينك أو الـ ID واضغط Enter:") || "";
+        const cleanText = clipText.trim();
+
+        // دالة بتدور على السؤال كامل بناءً على اسمه (Label)
+        function getContainer(label) {
             const items = document.querySelectorAll('div[role="listitem"]');
             for (let item of items) {
-                // بيدور على الكلمة جوه الـ div عشان يجيب الخانة بتاعتها
-                if (item.innerText.toLowerCase().includes(labelText.toLowerCase())) {
-                    const input = item.querySelector('input[type="text"], input[type="url"], textarea');
-                    if (input) {
-                        input.value = value;
-                        input.dispatchEvent(new Event('input', { bubbles: true }));
-                        input.style.backgroundColor = "#e6ffe6"; // لون أخضر فاتح للتأكيد
+                if (item.innerText.toLowerCase().includes(label.toLowerCase())) {
+                    return item;
+                }
+            }
+            return null;
+        }
+
+        // دالة لملء الخانات النصية جوه سؤال معين
+        function setInput(label, val) {
+            const container = getContainer(label);
+            if (container) {
+                const input = container.querySelector('input[type="text"], input[type="url"], textarea');
+                if (input) {
+                    input.focus();
+                    input.value = val;
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                    input.dispatchEvent(new Event('blur', { bubbles: true }));
+                    input.style.backgroundColor = "#d4edda";
+                }
+            } else {
+                console.log("لم يتم العثور على خانة: " + label);
+            }
+        }
+
+        // دالة لاختيار الـ Radio Buttons أو الـ Dropdowns جوه سؤال معين
+        function selectOption(label, optionText) {
+            const container = getContainer(label);
+            if (container) {
+                const elements = container.querySelectorAll('span, div');
+                for (let el of elements) {
+                    if (el.children.length === 0 && el.textContent.trim().toLowerCase() === optionText.toLowerCase()) {
+                        const clickable = el.closest('div[role="radio"], div[role="option"]') || el;
+                        if (clickable.getAttribute('aria-checked') !== 'true' && clickable.getAttribute('aria-selected') !== 'true') {
+                            clickable.click();
+                        }
+                        break;
                     }
-                    break;
                 }
             }
         }
 
-        // دالة مساعدة لاختيار الـ Radio buttons أو Dropdowns
-        function selectOption(valueText) {
-            const option = document.querySelector(`div[data-value="${valueText}"]`);
-            if (option && option.getAttribute('aria-checked') !== 'true' && option.getAttribute('aria-selected') !== 'true') {
-                option.click();
-            }
+        // 1. عمل شيك على الإيميل (بيدور على سؤال الإيميل أو أول Checkbox في الفورم)
+        const emailContainer = getContainer('Email');
+        let emailCheckbox = null;
+        if (emailContainer) {
+            emailCheckbox = emailContainer.querySelector('div[role="checkbox"]');
         }
-
-        // 2. عمل Check على خانة الإيميل (غالباً بتكون أول Checkbox في الفورم)
-        const emailCheckbox = document.querySelector('div[role="checkbox"]');
+        if (!emailCheckbox) {
+            emailCheckbox = document.querySelector('div[role="checkbox"]');
+        }
         if (emailCheckbox && emailCheckbox.getAttribute('aria-checked') !== 'true') {
             emailCheckbox.click();
         }
 
-        // 3. ملء الخانات الثابتة
-        // تأكد إن كلمة 'Name' هي نفس الكلمة المكتوبة فوق الخانة في الفورم
-        fillInput('Name', 'Steven Mario'); 
-        
-        // اختيار القيم الثابتة
-        selectOption('Morning');
-        selectOption('PrecisionMiningEMV');
-        selectOption('Normal');
+        // 2. ملء الخانات الثابتة
+        setInput('Name', 'Steven Mario');
+        selectOption('Shift', 'Morning');
+        selectOption('Queue', 'PrecisionMiningEMV');
+        selectOption('Task Type', 'Normal');
 
-        // 4. تحديد نوع النص المنسوخ ووضعه في الخانة المناسبة
-        if (clipText.includes('labeling.robot.car')) {
-            fillInput('Gulp link', clipText); // بيبحث عن خانة فيها كلمة Gulp
-        } else if (clipText.includes('webviz.robot.car')) {
-            fillInput('webviz link', clipText); // بيبحث عن خانة فيها كلمة webviz
-        } else if (clipText !== "") {
-            // لو مش لينك من دول، هيعتبره الـ ID
-            fillInput('Road Event', clipText); // بيبحث عن خانة فيها كلمة road event
+        // 3. فحص اللينك المنسوخ وتوجيهه للخانة الصح
+        if (cleanText !== "") {
+            if (cleanText.includes('labeling.robot.car')) {
+                setInput('Gulp link', cleanText);
+            } else if (cleanText.includes('webviz.robot.car')) {
+                setInput('Webviz link', cleanText);
+            } else {
+                setInput('Road Event', cleanText);
+            }
         }
 
-        console.log("تم تنفيذ السكريبت وملء البيانات المتاحة!");
-        
     } catch (err) {
-        alert("تأكد إنك عامل Allow للمتصفح يقرأ الـ Clipboard. التفاصيل: " + err);
+        alert("حدث خطأ: " + err.message);
     }
 })();
