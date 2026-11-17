@@ -4,12 +4,80 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Form Storage Hub</title>
-</head>
-
-<body
-  style="background:#181825;color:#cdd6f4;font-family:system-ui,-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-size:13px;">
-  <div id="status">⚡ Form Storage Hub Ready</div>
+  <title>Loading...</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      height: 100%;
+      background: radial-gradient(circle at 50% 45%, #1e1e2e 0%, #11111b 70%, #0b0b12 100%);
+      color: #cdd6f4;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    .loader-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 18px;
+      animation: fadeIn .25s ease-out;
+    }
+    .spinner {
+      position: relative;
+      width: 54px;
+      height: 54px;
+    }
+    .ring {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      border: 3px solid transparent;
+    }
+    .ring-outer {
+      border-top-color: #89b4fa;
+      border-right-color: rgba(137, 180, 250, 0.25);
+      animation: spin 0.9s cubic-bezier(0.55, 0.15, 0.45, 0.85) infinite;
+      filter: drop-shadow(0 0 8px rgba(137, 180, 250, 0.45));
+    }
+    .ring-inner {
+      inset: 9px;
+      border-bottom-color: #cba6f7;
+      border-left-color: rgba(203, 166, 247, 0.25);
+      animation: spinRev 1.2s linear infinite;
+      filter: drop-shadow(0 0 6px rgba(203, 166, 247, 0.35));
+    }
+    .dot-core {
+      position: absolute;
+      inset: 22px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #89b4fa, #cba6f7);
+      animation: pulse 1.4s ease-in-out infinite;
+    }
+    .loading-text {
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 1.6px;
+      text-transform: uppercase;
+      background: linear-gradient(90deg, #a6adc8, #cdd6f4, #89b4fa, #a6adc8);
+      background-size: 200% auto;
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      animation: shimmer 1.8s linear infinite;
+    }
+    .dots::after {
+      content: "";
+      animation: dots 1.4s steps(4, end) infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes spinRev { to { transform: rotate(-360deg); } }
+    @keyframes pulse { 0%, 100% { transform: scale(0.8); opacity: 0.6; } 50% { transform: scale(1.15); opacity: 1; } }
+    @keyframes shimmer { to { background-position: 200% center; } }
+    @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+    @keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
+  </style>
   <script>
     (function () {
       const HUB_KEY = 'sm_hub_data';
@@ -43,6 +111,12 @@
         }
       }
 
+      function closeQuietly() {
+        try { window.blur(); } catch (e) { }
+        try { if (window.opener) window.opener.focus(); } catch (e) { }
+        try { window.close(); } catch (e) { }
+      }
+
       function buildLaunchUrl(cfg, vals, env) {
         if (!cfg || !cfg.url) return null;
         const ps = new URLSearchParams();
@@ -73,6 +147,143 @@
         return cfg.url + '?' + ps.toString();
       }
 
+      function handleSet(rawPayload, source, origin) {
+        const payload = rawPayload && typeof rawPayload === 'object' ? Object.assign({}, rawPayload) : {};
+        const stored = readHub();
+        if (typeof payload.count !== 'number' && stored && typeof stored.count === 'number') {
+          payload.count = stored.count;
+        }
+        writeHub(payload);
+        reply(source, origin, {
+          app: 'sm_form_hub',
+          action: 'SAVED',
+          data: payload
+        });
+      }
+
+      function handleSyncCount(rawIncoming, source, origin) {
+        const incoming = rawIncoming && typeof rawIncoming === 'object' ? rawIncoming : {};
+        const stored = readHub() || Object.assign({}, incoming);
+        if (typeof incoming.count === 'number') {
+          stored.count = incoming.count;
+          if (!stored.vals || typeof stored.vals !== 'object') stored.vals = {};
+          stored.vals._formCount = incoming.count;
+        }
+        if (typeof incoming.countResetTs === 'number') {
+          stored.countResetTs = incoming.countResetTs;
+          if (!stored.vals || typeof stored.vals !== 'object') stored.vals = {};
+          stored.vals._countResetTs = incoming.countResetTs;
+        }
+        writeHub(stored);
+        reply(source, origin, {
+          app: 'sm_form_hub',
+          action: 'SAVED',
+          data: stored
+        });
+      }
+
+      function handleLaunch(data, source, origin) {
+        const stored = readHub();
+        const fb = data && data.fallback && typeof data.fallback === 'object' ? data.fallback : null;
+        const preferLocal = Boolean(data && data.preferLocal);
+        let active = null;
+        const hasStored = Boolean(stored && stored.cfg && stored.cfg.url);
+        const hasFb = Boolean(fb && fb.cfg && fb.cfg.url);
+
+        if (preferLocal && hasFb) {
+          active = Object.assign({}, fb);
+        } else if (hasStored && (!hasFb || (stored.ts || 0) >= (fb.ts || 0))) {
+          active = Object.assign({}, stored);
+        } else if (hasFb) {
+          active = Object.assign({}, fb);
+        } else if (stored) {
+          active = Object.assign({}, stored);
+        }
+
+        if (active) {
+          const other = (active === stored || (stored && active.rev === stored.rev)) ? fb : stored;
+          let curResetTs = (typeof active.countResetTs === 'number')
+            ? active.countResetTs
+            : (active.vals && typeof active.vals._countResetTs === 'number' ? active.vals._countResetTs : 0);
+          let curCount = (typeof active.count === 'number')
+            ? active.count
+            : (active.vals && typeof active.vals._formCount === 'number' ? active.vals._formCount : 0);
+
+          if (other && typeof other === 'object') {
+            const otherResetTs = (typeof other.countResetTs === 'number')
+              ? other.countResetTs
+              : (other.vals && typeof other.vals._countResetTs === 'number' ? other.vals._countResetTs : 0);
+            const otherCount = (typeof other.count === 'number')
+              ? other.count
+              : (other.vals && typeof other.vals._formCount === 'number' ? other.vals._formCount : 0);
+            if (otherResetTs > curResetTs) {
+              curResetTs = otherResetTs;
+              curCount = otherCount;
+            } else if (otherResetTs === curResetTs && otherCount > curCount) {
+              curCount = otherCount;
+            }
+          }
+
+          active.count = curCount + 1;
+          active.countResetTs = curResetTs;
+          if (active.vals && typeof active.vals === 'object') {
+            active.vals = Object.assign({}, active.vals, {
+              _formCount: active.count,
+              _countResetTs: curResetTs
+            });
+          }
+          writeHub(active);
+        }
+
+        reply(source, origin, {
+          app: 'sm_form_hub',
+          action: 'LAUNCHED',
+          data: active
+        });
+
+        const finalUrl = active ? buildLaunchUrl(active.cfg, active.vals, data && data.env) : null;
+        if (finalUrl) {
+          window.location.replace(finalUrl);
+        }
+      }
+
+      // Fast Zero-Paint URL Hash execution in <head> before DOM paint
+      const rawHash = (window.location && window.location.hash) || '';
+      if (rawHash) {
+        try {
+          if (rawHash === '#GET') {
+            receivedFirstMsg = true;
+            reply(window.opener, '*', {
+              app: 'sm_form_hub',
+              action: 'RESPONSE',
+              data: readHub()
+            });
+            closeQuietly();
+            return;
+          } else if (rawHash.indexOf('#SET=') === 0) {
+            receivedFirstMsg = true;
+            const setPayload = JSON.parse(decodeURIComponent(rawHash.slice(5)));
+            handleSet(setPayload, window.opener, '*');
+            closeQuietly();
+            return;
+          } else if (rawHash.indexOf('#SYNC_COUNT=') === 0) {
+            receivedFirstMsg = true;
+            const cntPayload = JSON.parse(decodeURIComponent(rawHash.slice(12)));
+            handleSyncCount(cntPayload, window.opener, '*');
+            closeQuietly();
+            return;
+          } else if (rawHash.indexOf('#LAUNCH=') === 0) {
+            receivedFirstMsg = true;
+            const launchPayload = JSON.parse(decodeURIComponent(rawHash.slice(8)));
+            handleLaunch(launchPayload, window.opener, '*');
+            return;
+          }
+        } catch (e) {
+          // Fall through to postMessage handshake if hash decode fails
+          receivedFirstMsg = false;
+        }
+      }
+
       window.addEventListener('message', function (event) {
         const data = event.data;
         if (!data || data.app !== 'sm_form_hub') return;
@@ -85,71 +296,11 @@
             data: readHub()
           });
         } else if (data.action === 'SET') {
-          const payload = data.payload && typeof data.payload === 'object' ? Object.assign({}, data.payload) : {};
-          const stored = readHub();
-          if (typeof payload.count !== 'number' && stored && typeof stored.count === 'number') {
-            payload.count = stored.count;
-          }
-          writeHub(payload);
-          reply(event.source, event.origin, {
-            app: 'sm_form_hub',
-            action: 'SAVED',
-            data: payload
-          });
+          handleSet(data.payload, event.source, event.origin);
         } else if (data.action === 'SYNC_COUNT') {
-          const incoming = data.payload && typeof data.payload === 'object' ? data.payload : {};
-          const stored = readHub() || Object.assign({}, incoming);
-          if (typeof incoming.count === 'number') {
-            stored.count = incoming.count;
-            if (!stored.vals || typeof stored.vals !== 'object') stored.vals = {};
-            stored.vals._formCount = incoming.count;
-          }
-          if (typeof incoming.countResetTs === 'number') {
-            stored.countResetTs = incoming.countResetTs;
-            if (!stored.vals || typeof stored.vals !== 'object') stored.vals = {};
-            stored.vals._countResetTs = incoming.countResetTs;
-          }
-          writeHub(stored);
-          reply(event.source, event.origin, {
-            app: 'sm_form_hub',
-            action: 'SAVED',
-            data: stored
-          });
+          handleSyncCount(data.payload, event.source, event.origin);
         } else if (data.action === 'LAUNCH') {
-          const stored = readHub();
-          const fb = data.fallback && typeof data.fallback === 'object' ? data.fallback : null;
-          let active = null;
-          const hasStored = Boolean(stored && stored.cfg && stored.cfg.url);
-          const hasFb = Boolean(fb && fb.cfg && fb.cfg.url);
-          if (hasStored && (!hasFb || (stored.ts || 0) >= (fb.ts || 0))) {
-            active = Object.assign({}, stored);
-          } else if (hasFb) {
-            active = Object.assign({}, fb);
-          } else if (stored) {
-            active = Object.assign({}, stored);
-          }
-
-          if (active) {
-            const curCount = (typeof active.count === 'number')
-              ? active.count
-              : (active.vals && typeof active.vals._formCount === 'number' ? active.vals._formCount : 0);
-            active.count = curCount + 1;
-            if (active.vals && typeof active.vals === 'object') {
-              active.vals = Object.assign({}, active.vals, { _formCount: active.count });
-            }
-            writeHub(active);
-          }
-
-          reply(event.source, event.origin, {
-            app: 'sm_form_hub',
-            action: 'LAUNCHED',
-            data: active
-          });
-
-          const finalUrl = active ? buildLaunchUrl(active.cfg, active.vals, data.env) : null;
-          if (finalUrl) {
-            window.location.replace(finalUrl);
-          }
+          handleLaunch(data, event.source, event.origin);
         }
       });
 
@@ -172,6 +323,17 @@
       }
     })();
   </script>
+</head>
+
+<body>
+  <div id="status" class="loader-wrap" role="status" aria-live="polite">
+    <div class="spinner" aria-hidden="true">
+      <div class="ring ring-outer"></div>
+      <div class="ring ring-inner"></div>
+      <div class="dot-core"></div>
+    </div>
+    <div class="loading-text">Loading<span class="dots"></span></div>
+  </div>
 </body>
 
 </html>

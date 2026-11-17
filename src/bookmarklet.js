@@ -4,7 +4,19 @@ javascript: void (function M(BAKED) {
   var DEF_SITE = "labeling.robot.car";
 
   try {
-    // 1. إغلاق أي نافذة أو توست مفتوح مسبقاً (Toggle)
+    // تجنب التشغيل داخل نافذة الـ Hub نفسها
+    if (window.name === "sm_hub" || (location && location.hostname === "netherdragon99.github.io")) {
+      return;
+    }
+
+    // 1. إلغاء مؤقت الفتح التلقائي عند النقر المزدوج أو إغلاق النافذة المفتوحة مسبقاً (Toggle)
+    var autoOpenCancelled = false;
+    if (window._sm_auto_tm) {
+      clearTimeout(window._sm_auto_tm);
+      window._sm_auto_tm = null;
+      autoOpenCancelled = true;
+    }
+
     var oldModal = document.getElementById(ID);
     if (oldModal) {
       oldModal.remove();
@@ -12,6 +24,24 @@ javascript: void (function M(BAKED) {
     }
     var oldToast = document.getElementById("sm_toast");
     if (oldToast) oldToast.remove();
+
+    function getRoot() {
+      if (document.body) return document.body;
+      if (document.documentElement) {
+        try {
+          var b = document.createElement("body");
+          document.documentElement.appendChild(b);
+          if (document.body) return document.body;
+        } catch (e) { }
+        return document.documentElement;
+      }
+      return null;
+    }
+
+    function appendRoot(el) {
+      var r = getRoot();
+      if (r && el) r.appendChild(el);
+    }
 
     // 2. دالة النسخ الآمنة للحافظة (Clipboard Copy with ExecCommand Fallback)
     function copyText(text, cb) {
@@ -32,11 +62,11 @@ javascript: void (function M(BAKED) {
           ta.style.top = "0";
           ta.style.left = "0";
           ta.style.opacity = "0";
-          document.body.appendChild(ta);
+          appendRoot(ta);
           ta.focus();
           ta.select();
           var ok = document.execCommand("copy");
-          document.body.removeChild(ta);
+          if (ta.parentNode) ta.parentNode.removeChild(ta);
           if (cb) cb(ok);
         } catch (e) {
           if (cb) cb(false);
@@ -129,7 +159,7 @@ javascript: void (function M(BAKED) {
         var raw = window.FB_PUBLIC_LOAD_DATA_;
         if (!raw || !raw[1] || !raw[1][1]) return null;
 
-        var cleanPath = location.pathname.replace(/\/(formResponse|edit|prefill).*$/, "/viewform");
+        var cleanPath = location.pathname.replace(/\/(formResponse|edit|prefill|preview).*$/, "/viewform");
         var url = location.origin + cleanPath;
         var title = "Custom Form";
         var tEl = document.querySelector(".F9yp7e");
@@ -247,7 +277,7 @@ javascript: void (function M(BAKED) {
 
     var now = Date.now();
     var lastRun = parseInt(store.get("sm_last_run") || "0", 10);
-    var isDbl = (now - lastRun) > 0 && (now - lastRun) < 800;
+    var isDbl = autoOpenCancelled || ((now - lastRun) > 0 && (now - lastRun) < 800);
     store.set("sm_last_run", isDbl ? "0" : String(now));
 
     // 8. توليد رابط فتح الفورم وتعبئته التلقائية
@@ -277,12 +307,11 @@ javascript: void (function M(BAKED) {
       return cfg.url + "?" + ps.toString();
     }
 
-    function openForm(v) {
-      var u = launchUrl(v);
-      if (!u) return false;
+    function openTargetWin(u, mode) {
+      if (!u) return null;
       var win = null;
       try {
-        if (v.openMode === "window") {
+        if (mode === "window") {
           var w = 480, h = 740;
           var screenW = (window.screen && window.screen.availWidth) || 1024;
           var l = Math.max(0, screenW - w - 20);
@@ -300,13 +329,112 @@ javascript: void (function M(BAKED) {
           win = null;
         }
       }
-      if (!win) {
-        try {
-          window.location.href = u;
-          win = true;
-        } catch (e3) { }
+      return win;
+    }
+
+    function getHubFallback(tsVal) {
+      var mySyncTs = (typeof tsVal === "number" && tsVal > 0)
+        ? tsVal
+        : (parseInt(store.get("sm_sync_ts") || "0", 10) || 0);
+      return {
+        ts: mySyncTs,
+        rev: localRev,
+        count: formCount,
+        countResetTs: countResetTs,
+        cfg: (cfg && cfg.url) ? cfg : null,
+        vals: vals
+      };
+    }
+
+    function getEnvData() {
+      return {
+        isGulp: Boolean(isGulp && !isForm),
+        autoGulp: autoGulp || "",
+        autoWebviz: autoWebviz || "",
+        autoSeg: autoSeg || ""
+      };
+    }
+
+    // فتح الفورم ومزامنة العداد عبر نافذة واحدة فقط (Zero Dual-Popup)
+    function launchViaHub(preferLocal) {
+      var launchReq = {
+        preferLocal: Boolean(preferLocal),
+        fallback: getHubFallback(),
+        env: getEnvData()
+      };
+      var targetUrl = HUB_URL;
+      try {
+        var enc = encodeURIComponent(JSON.stringify(launchReq));
+        if (enc.length < 32000) {
+          targetUrl = HUB_URL + "#LAUNCH=" + enc;
+        }
+      } catch (e) { }
+
+      var win = null;
+      var done = false;
+      var sent = false;
+
+      function cleanup() {
+        done = true;
+        clearTimeout(fbTimer);
+        clearTimeout(maxTimer);
+        try { window.removeEventListener("message", onLaunchMsg); } catch (e) { }
       }
-      return Boolean(win);
+
+      function onLaunchMsg(ev) {
+        if (!ev || !ev.data || ev.data.app !== "sm_form_hub") return;
+        if (ev.source && win && ev.source !== win) return;
+        var act = ev.data.action;
+        if (act === "READY") {
+          if (sent || !win || win.closed) return;
+          sent = true;
+          try {
+            win.postMessage({
+              app: "sm_form_hub",
+              action: "LAUNCH",
+              preferLocal: launchReq.preferLocal,
+              fallback: launchReq.fallback,
+              env: launchReq.env
+            }, "*");
+          } catch (e) { }
+        } else if (act === "LAUNCHED") {
+          cleanup();
+          if (ev.data.data) {
+            applyCloudData(ev.data.data);
+            if (uiRefs && uiRefs.countEl && document.getElementById(ID)) {
+              uiRefs.countEl.textContent = "📊 Forms: " + formCount;
+            }
+          }
+        }
+      }
+
+      window.addEventListener("message", onLaunchMsg);
+      win = openTargetWin(targetUrl, vals.openMode);
+
+      if (!win) {
+        cleanup();
+        return false;
+      }
+
+      var fbTimer = setTimeout(function () {
+        if (done) return;
+        cleanup();
+        formCount++;
+        persist(false);
+        if (uiRefs && uiRefs.countEl && document.getElementById(ID)) {
+          uiRefs.countEl.textContent = "📊 Forms: " + formCount;
+        }
+        var fbUrl = launchUrl(vals);
+        if (fbUrl && win && !win.closed) {
+          try { win.location.href = fbUrl; } catch (e) { }
+        }
+      }, 2500);
+
+      var maxTimer = setTimeout(function () {
+        if (!done) cleanup();
+      }, 10000);
+
+      return true;
     }
 
     // 9. المزامنة والتحقق من التضارب عبر Storage Hub (Cross-Origin Hub)
@@ -376,10 +504,11 @@ javascript: void (function M(BAKED) {
 
       function onMsg(ev) {
         if (!ev || !ev.data || ev.data.app !== "sm_form_hub") return;
+        if (ev.source && pop && ev.source !== pop) return;
         var act = ev.data.action;
 
         if (act === "READY") {
-          if (sent) return;
+          if (sent || !pop) return;
           sent = true;
           if (action === "save") {
             pop.postMessage({ app: "sm_form_hub", action: "SET", payload: payload }, "*");
@@ -393,45 +522,6 @@ javascript: void (function M(BAKED) {
           fin({ status: "ok", data: ev.data.data || payload });
         } else if (act === "RESPONSE") {
           var d = ev.data.data;
-          if (action === "auto_sync") {
-            var myTs = (payload && payload.ts) || 0;
-            if (d && d.cfg && d.cfg.url && d.rev !== localRev && (d.ts || 0) >= myTs) {
-              applyCloudData(d);
-              formCount++;
-              persist(false);
-              var nextPayload = {
-                ts: parseInt(store.get("sm_sync_ts") || "0", 10) || Date.now(),
-                rev: localRev,
-                count: formCount,
-                countResetTs: countResetTs,
-                cfg: (cfg && cfg.url) ? cfg : null,
-                vals: vals
-              };
-              pop.postMessage({ app: "sm_form_hub", action: "SET", payload: nextPayload }, "*");
-            } else {
-              if (d && typeof d.count === "number") {
-                var sRst = (d.vals && d.vals._countResetTs) || d.countResetTs || 0;
-                if (sRst > countResetTs) {
-                  countResetTs = sRst;
-                  formCount = d.count + 1;
-                } else if (sRst === countResetTs && d.count >= formCount) {
-                  formCount = d.count + 1;
-                }
-              }
-              persist(false);
-              var syncPayload = {
-                ts: (d && d.ts && d.ts > myTs) ? d.ts : (myTs || Date.now()),
-                rev: localRev,
-                count: formCount,
-                countResetTs: countResetTs,
-                cfg: (cfg && cfg.url) ? cfg : (d && d.cfg || null),
-                vals: vals
-              };
-              pop.postMessage({ app: "sm_form_hub", action: "SET", payload: syncPayload }, "*");
-            }
-            return;
-          }
-
           closePop();
           if (action === "ping") {
             fin({
@@ -459,9 +549,25 @@ javascript: void (function M(BAKED) {
         fin({ status: "error", msg: "Timeout" });
       }, 8000);
 
+      var targetUrl = HUB_URL;
+      try {
+        if (action === "save") {
+          var encSet = encodeURIComponent(JSON.stringify(payload || {}));
+          if (encSet.length < 32000) targetUrl = HUB_URL + "#SET=" + encSet;
+        } else if (action === "sync_count") {
+          var encCnt = encodeURIComponent(JSON.stringify(payload || {}));
+          if (encCnt.length < 32000) targetUrl = HUB_URL + "#SYNC_COUNT=" + encCnt;
+        } else {
+          targetUrl = HUB_URL + "#GET";
+        }
+      } catch (e) { }
+
       try {
         window.addEventListener("message", onMsg);
-        pop = window.open(HUB_URL, "sm_hub", "width=10,height=10,left=-9999,top=-9999");
+        var sw = (window.screen && window.screen.availWidth) || 1024;
+        var sh = (window.screen && window.screen.availHeight) || 768;
+        pop = window.open(targetUrl, "sm_hub", "width=1,height=1,left=" + Math.max(0, sw - 10) + ",top=" + Math.max(0, sh - 10) + ",menubar=no,toolbar=no,status=no");
+        try { window.focus(); } catch (e) { }
         if (!pop) {
           fin({ status: "error", msg: "Popup blocked by browser" });
         }
@@ -475,14 +581,7 @@ javascript: void (function M(BAKED) {
       var ts = parseInt(store.get("sm_sync_ts") || "0", 10) || Date.now();
       store.set("sm_sync_ts", String(ts));
 
-      hubCall("save", {
-        ts: ts,
-        rev: localRev,
-        count: formCount,
-        countResetTs: countResetTs,
-        cfg: (cfg && cfg.url) ? cfg : null,
-        vals: vals
-      }, function (r) {
+      hubCall("save", getHubFallback(ts), function (r) {
         var ok = Boolean(r && r.status === "ok");
         if (ok && r.data) {
           if (r.data.ts) store.set("sm_sync_ts", String(r.data.ts));
@@ -510,7 +609,7 @@ javascript: void (function M(BAKED) {
         }
         var cTs = d.ts || 0;
         var lTs = parseInt(store.get("sm_sync_ts") || "0", 10) || 0;
-        if (cTs > lTs && lTs > 0) {
+        if (cTs >= lTs && cTs > 0) {
           applyCloudData(d);
           pendingUpdate = null;
           if (onResult) onResult(true, true, false);
@@ -589,13 +688,18 @@ javascript: void (function M(BAKED) {
       var existing = document.getElementById(ID);
       if (existing) existing.remove();
 
-      var rawPos = jp(store.get("sm_ui_pos"), null) || { top: "16px", left: "auto", right: "16px", width: "400px", height: "auto" };
+      var rawPos = jp(store.get("sm_ui_pos"), null) || {};
       var vw = window.innerWidth || 1024;
-      var boxW = Math.min(Math.max(parseInt(rawPos.width, 10) || 400, 355), vw - 20);
+      var posTop = (rawPos.top && /^[\d.-]+px$/.test(rawPos.top)) ? rawPos.top : "16px";
+      var posLeft = (rawPos.left && (/^[\d.-]+px$/.test(rawPos.left) || rawPos.left === "auto")) ? rawPos.left : "auto";
+      var posRight = (rawPos.right && (/^[\d.-]+px$/.test(rawPos.right) || rawPos.right === "auto")) ? rawPos.right : (posLeft === "auto" ? "16px" : "auto");
+      var boxW = Math.min(Math.max(parseInt(rawPos.width, 10) || 400, 355), Math.max(355, vw - 20));
+      var parsedH = parseInt(rawPos.height, 10);
+      var posH = (rawPos.height && rawPos.height !== "auto" && parsedH >= 320) ? rawPos.height : "auto";
 
       var box = mk("div", {
         id: ID,
-        style: "position:fixed;top:" + rawPos.top + ";left:" + rawPos.left + ";right:" + rawPos.right + ";width:" + boxW + "px;height:" + rawPos.height + ";min-width:355px;min-height:320px;max-width:95vw;max-height:92vh;background:#181825;color:#cdd6f4;border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.7);border:1px solid #313244;z-index:2147483647;font-family:system-ui,-apple-system,sans-serif;font-size:12px;direction:ltr;text-align:left;display:flex;flex-direction:column;resize:both;overflow:hidden;"
+        style: "position:fixed;top:" + posTop + ";left:" + posLeft + ";right:" + posRight + ";width:" + boxW + "px;height:" + posH + ";min-width:355px;min-height:320px;max-width:95vw;max-height:92vh;background:#181825;color:#cdd6f4;border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.7);border:1px solid #313244;z-index:2147483647;font-family:system-ui,-apple-system,sans-serif;font-size:12px;direction:ltr;text-align:left;display:flex;flex-direction:column;resize:both;overflow:hidden;"
       });
 
       // CSS Stylesheet
@@ -653,8 +757,8 @@ javascript: void (function M(BAKED) {
           if (!isNaN(nv) && nv >= 0) {
             formCount = nv;
             countResetTs = Date.now();
-            persist(false);
-            pushHub();
+            persist(true);
+            syncEl.textContent = "⚡ Local changes (#" + localRev + ")";
           }
           cls();
         };
@@ -682,8 +786,8 @@ javascript: void (function M(BAKED) {
         yB.onclick = function () {
           formCount = 0;
           countResetTs = Date.now();
-          persist(false);
-          pushHub();
+          persist(true);
+          syncEl.textContent = "⚡ Local changes (#" + localRev + ")";
           cls();
         };
         nB.onclick = cls;
@@ -718,13 +822,15 @@ javascript: void (function M(BAKED) {
       }
 
       function savePos() {
-        store.set("sm_ui_pos", JSON.stringify({
-          top: box.style.top,
-          left: box.style.left,
-          right: box.style.right,
-          width: box.style.width,
-          height: box.style.height
-        }));
+        if (box.offsetWidth > 200 && box.offsetHeight > 200) {
+          store.set("sm_ui_pos", JSON.stringify({
+            top: box.style.top,
+            left: box.style.left,
+            right: box.style.right,
+            width: box.style.width,
+            height: box.style.height
+          }));
+        }
       }
 
       // تحريك وسحب النافذة
@@ -962,9 +1068,6 @@ javascript: void (function M(BAKED) {
         if (diffForm) {
           showRelinkConfirm("⚠️ Different Form: " + (pageCfg.title || "New Form"), "🔗 Link this form", "#f9e2af");
           content.appendChild(bn);
-        } else if (isForm && pageCfg && hasForm) {
-          showRelinkConfirm("✔ This form is linked", "🔄 Re-link (Reset Form)", "#a6e3a1");
-          content.appendChild(bn);
         } else if (unlinked) {
           bn.style.borderColor = "#a6e3a1";
           bn.appendChild(mk("div", { style: "display:flex;justify-content:space-between;align-items:center;gap:8px;" }, [
@@ -1085,7 +1188,7 @@ javascript: void (function M(BAKED) {
                       if (s === DEF_SITE) store.set("sm_def_removed", "1");
                       allowedSites.splice(idx, 1);
                       persist(true);
-                      pushHub();
+                      syncEl.textContent = "⚡ Local changes (#" + localRev + ")";
                       renderSites();
                     }
                   }),
@@ -1120,7 +1223,7 @@ javascript: void (function M(BAKED) {
                 if (curDom === DEF_SITE) store.rm("sm_def_removed");
                 allowedSites.push(curDom);
                 persist(true);
-                pushHub();
+                syncEl.textContent = "⚡ Local changes (#" + localRev + ")";
                 renderSites();
               }
             }));
@@ -1138,7 +1241,7 @@ javascript: void (function M(BAKED) {
                   if (dom === DEF_SITE) store.rm("sm_def_removed");
                   allowedSites.push(dom);
                   persist(true);
-                  pushHub();
+                  syncEl.textContent = "⚡ Local changes (#" + localRev + ")";
                   renderSites();
                 }
               }
@@ -1216,10 +1319,7 @@ javascript: void (function M(BAKED) {
             return;
           }
           openBtn.disabled = true;
-          formCount++;
-          persist(false);
-          var opened = openForm(vals);
-          pushHub();
+          var opened = launchViaHub(true);
           if (opened) {
             box.remove();
           } else {
@@ -1309,7 +1409,7 @@ javascript: void (function M(BAKED) {
         box.appendChild(el);
       });
 
-      document.body.appendChild(box);
+      appendRoot(box);
       clampModal();
 
       uiRefs = {
@@ -1336,30 +1436,22 @@ javascript: void (function M(BAKED) {
     var hasSavedLocal = Boolean(cfg && cfg.url && Array.isArray(cfg.fields) && cfg.fields.length > 0);
     var shouldAutoOpen = !isForm && onAllowedSite && Boolean(vals.autoOpen) && !isDbl && hasSavedLocal;
 
-    // السيناريو 1: الفتح التلقائي الفوري في المواقع المصرح بها
+    // السيناريو 1: الفتح التلقائي الفوري في المواقع المصرح بها (مع مهلة 300ms لالتقاط النقر المزدوج)
     if (shouldAutoOpen) {
-      formCount++;
-      persist(false);
-      var okOpen = openForm(vals);
-      var mySyncTs = parseInt(store.get("sm_sync_ts") || "0", 10) || 0;
-      hubCall("auto_sync", {
-        ts: mySyncTs,
-        rev: localRev,
-        count: formCount,
-        countResetTs: countResetTs,
-        cfg: cfg,
-        vals: vals
-      });
-      if (!okOpen) {
-        renderUI("⚠️ Browser blocked the popup! Click '🚀 Open Now' below.");
-      }
+      window._sm_auto_tm = setTimeout(function () {
+        window._sm_auto_tm = null;
+        var okOpen = launchViaHub(false);
+        if (!okOpen) {
+          renderUI("⚠️ Browser blocked the popup! Click '🚀 Open Now' below.");
+        }
+      }, 300);
       return;
     }
 
-    // السيناريو 2: فتح واجهة الإعدادات (في المواقع غير المصرحة، أو عند النقر المزدوج للتعديل، أو في صفحة الفورم)
-    if (hasSavedLocal || isForm) {
-      renderUI();
+    // السيناريو 2: فتح واجهة الإعدادات فوراً (في كل المواقع، أو عند النقر المزدوج، أو على البارد)
+    renderUI();
 
+    if (!hasSavedLocal || !isForm) {
       var prevRev = localRev;
       uiRefs.syncEl.textContent = "🔄 Checking Hub" + (localRev ? " (#" + localRev + ")" : "") + "...";
       bgCheckHub(function (ok, cntCh, hasUp) {
@@ -1376,7 +1468,7 @@ javascript: void (function M(BAKED) {
         if (cntCh && uiRefs.countEl) {
           uiRefs.countEl.textContent = "📊 Forms: " + formCount;
         }
-        if ((hasUp || localRev !== prevRev) && uiRefs.build) {
+        if ((hasUp || localRev !== prevRev || (!prevRev && cfg && cfg.url)) && uiRefs.build) {
           uiRefs.syncEl.textContent = hasUp ? "🔔 Update found!" : "✔ Synced (#" + (localRev || "ok") + ")";
           uiRefs.build();
         } else if (ok) {
@@ -1385,61 +1477,7 @@ javascript: void (function M(BAKED) {
           uiRefs.syncEl.textContent = "⚡ Hub Ready (Offline)";
         }
       });
-      return;
     }
-
-    // السيناريو 3: تشغيل على البارد (Cold Start on New Site - لا توجد داتا محلية)
-    var loadBox = (function () {
-      var rawPos = jp(store.get("sm_ui_pos"), null) || { top: "16px", left: "auto", right: "16px", width: "395px", height: "auto" };
-      var vw = window.innerWidth || 1024;
-      var boxW = Math.min(Math.max(parseInt(rawPos.width, 10) || 395, 355), vw - 20);
-      var box = mk("div", {
-        id: ID,
-        style: "position:fixed;top:" + rawPos.top + ";left:" + rawPos.left + ";right:" + rawPos.right + ";width:" + boxW + "px;height:160px;min-width:355px;background:#181825;color:#cdd6f4;border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.7);border:1px solid #313244;z-index:2147483647;font-family:system-ui,-apple-system,sans-serif;font-size:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;"
-      });
-      var spinner = mk("div", {
-        style: "width:28px;height:28px;border:3px solid #45475a;border-top:3px solid #89b4fa;border-radius:50%;animation:sm_spin .8s linear infinite;margin-bottom:10px;"
-      });
-      var spinStyle = mk("style", {
-        text: "@keyframes sm_spin{0%{transform:rotate(0deg);}100%{transform:rotate(360deg);}}"
-      });
-      var text = mk("div", {
-        style: "color:#a6adc8;font-weight:600;font-size:12px;",
-        text: "⏳ Checking Storage Hub..."
-      });
-      box.appendChild(spinStyle);
-      box.appendChild(spinner);
-      box.appendChild(text);
-      document.body.appendChild(box);
-      return box;
-    })();
-
-    var doneInit = false;
-    function finishInit(loaded) {
-      if (doneInit) return;
-      doneInit = true;
-      if (loadBox) loadBox.remove();
-
-      var onAllowed = checkAllowedSite(location.host, allowedSites);
-      if (loaded && !isForm && onAllowed && vals.autoOpen && !isDbl && cfg && cfg.url) {
-        formCount++;
-        persist(false);
-        if (!openForm(vals)) {
-          renderUI("⚠️ Popup blocked! Click '🚀 Open Now' below.");
-        } else {
-          hubCall("sync_count", { count: formCount, countResetTs: countResetTs });
-        }
-        return;
-      }
-      renderUI();
-    }
-
-    setTimeout(function () { finishInit(false); }, 4000);
-
-    hubCall("load", null, function (r) {
-      var ok = Boolean(r && r.status === "ok" && r.data && applyCloudData(r.data));
-      finishInit(ok);
-    });
 
   } catch (err) {
     var mEl = document.getElementById(ID);
