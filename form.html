@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Form Storage Hub</title>
+</head>
+
+<body
+  style="background:#181825;color:#cdd6f4;font-family:system-ui,-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-size:13px;">
+  <div id="status">⚡ Form Storage Hub Ready</div>
+  <script>
+    (function () {
+      const HUB_KEY = 'sm_hub_data';
+      let receivedFirstMsg = false;
+
+      function readHub() {
+        try {
+          const stored = localStorage.getItem(HUB_KEY);
+          return stored ? JSON.parse(stored) : null;
+        } catch (e) {
+          return null;
+        }
+      }
+
+      function writeHub(obj) {
+        try {
+          localStorage.setItem(HUB_KEY, JSON.stringify(obj));
+          return true;
+        } catch (e) {
+          return false;
+        }
+      }
+
+      function reply(source, origin, payload) {
+        if (!source) return;
+        const target = (!origin || origin === 'null') ? '*' : origin;
+        try {
+          source.postMessage(payload, target);
+        } catch (e) {
+          try { source.postMessage(payload, '*'); } catch (e2) { }
+        }
+      }
+
+      function buildLaunchUrl(cfg, vals, env) {
+        if (!cfg || !cfg.url) return null;
+        const ps = new URLSearchParams();
+        ps.append('usp', 'pp_url');
+        const fields = Array.isArray(cfg.fields) ? cfg.fields : [];
+        const mapping = (cfg.mapping && typeof cfg.mapping === 'object') ? cfg.mapping : {};
+        const v = (vals && typeof vals === 'object') ? vals : {};
+        const e = env || {};
+
+        fields.forEach(function (f) {
+          const sk = Object.keys(mapping).filter(function (k) { return mapping[k] === f.id; })[0];
+          let val = v[f.id];
+          if ((val === undefined || val === null || val === '') && sk) val = v[sk];
+          if (e.isGulp) {
+            if (sk === 'gulp' && e.autoGulp) val = e.autoGulp;
+            else if (sk === 'webviz' && e.autoWebviz) val = e.autoWebviz;
+            else if (sk === 'roadEvent' && e.autoSeg) val = e.autoSeg;
+          }
+          if (val !== undefined && val !== null && String(val) !== '') {
+            ps.append('entry.' + f.id, String(val));
+          }
+        });
+
+        if (e.autoGulp && !mapping.gulp) ps.append('gulp_fallback', e.autoGulp);
+        if (e.autoWebviz && !mapping.webviz) ps.append('webviz_fallback', e.autoWebviz);
+        if (e.autoSeg && !mapping.roadEvent) ps.append('seg_fallback', e.autoSeg);
+
+        return cfg.url + '?' + ps.toString();
+      }
+
+      window.addEventListener('message', function (event) {
+        const data = event.data;
+        if (!data || data.app !== 'sm_form_hub') return;
+        receivedFirstMsg = true;
+
+        if (data.action === 'GET') {
+          reply(event.source, event.origin, {
+            app: 'sm_form_hub',
+            action: 'RESPONSE',
+            data: readHub()
+          });
+        } else if (data.action === 'SET') {
+          const payload = data.payload && typeof data.payload === 'object' ? Object.assign({}, data.payload) : {};
+          const stored = readHub();
+          if (typeof payload.count !== 'number' && stored && typeof stored.count === 'number') {
+            payload.count = stored.count;
+          }
+          writeHub(payload);
+          reply(event.source, event.origin, {
+            app: 'sm_form_hub',
+            action: 'SAVED',
+            data: payload
+          });
+        } else if (data.action === 'SYNC_COUNT') {
+          const incoming = data.payload && typeof data.payload === 'object' ? data.payload : {};
+          const stored = readHub() || Object.assign({}, incoming);
+          if (typeof incoming.count === 'number') {
+            stored.count = incoming.count;
+            if (!stored.vals || typeof stored.vals !== 'object') stored.vals = {};
+            stored.vals._formCount = incoming.count;
+          }
+          if (typeof incoming.countResetTs === 'number') {
+            stored.countResetTs = incoming.countResetTs;
+            if (!stored.vals || typeof stored.vals !== 'object') stored.vals = {};
+            stored.vals._countResetTs = incoming.countResetTs;
+          }
+          writeHub(stored);
+          reply(event.source, event.origin, {
+            app: 'sm_form_hub',
+            action: 'SAVED',
+            data: stored
+          });
+        } else if (data.action === 'LAUNCH') {
+          const stored = readHub();
+          const fb = data.fallback && typeof data.fallback === 'object' ? data.fallback : null;
+          let active = null;
+          const hasStored = Boolean(stored && stored.cfg && stored.cfg.url);
+          const hasFb = Boolean(fb && fb.cfg && fb.cfg.url);
+          if (hasStored && (!hasFb || (stored.ts || 0) >= (fb.ts || 0))) {
+            active = Object.assign({}, stored);
+          } else if (hasFb) {
+            active = Object.assign({}, fb);
+          } else if (stored) {
+            active = Object.assign({}, stored);
+          }
+
+          if (active) {
+            const curCount = (typeof active.count === 'number')
+              ? active.count
+              : (active.vals && typeof active.vals._formCount === 'number' ? active.vals._formCount : 0);
+            active.count = curCount + 1;
+            if (active.vals && typeof active.vals === 'object') {
+              active.vals = Object.assign({}, active.vals, { _formCount: active.count });
+            }
+            writeHub(active);
+          }
+
+          reply(event.source, event.origin, {
+            app: 'sm_form_hub',
+            action: 'LAUNCHED',
+            data: active
+          });
+
+          const finalUrl = active ? buildLaunchUrl(active.cfg, active.vals, data.env) : null;
+          if (finalUrl) {
+            window.location.replace(finalUrl);
+          }
+        }
+      });
+
+      if (window.opener) {
+        function sendReady() {
+          try {
+            window.opener.postMessage({ app: 'sm_form_hub', action: 'READY' }, '*');
+          } catch (e) { }
+        }
+        sendReady();
+        let retries = 0;
+        const iv = setInterval(function () {
+          retries++;
+          if (receivedFirstMsg || retries >= 10 || !window.opener) {
+            clearInterval(iv);
+            return;
+          }
+          sendReady();
+        }, 150);
+      }
+    })();
+  </script>
+</body>
+
+</html>

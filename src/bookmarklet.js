@@ -1,5 +1,5 @@
-javascript:(function M(BAKED) {
-  var API = "https://script.google.com/macros/s/AKfycbzpd_ftWytnl7SiDK4azmEj9zWQk8jzB09vqdvOnBjd3x08sP19NA8wniHTc8_vCvDUtQ/exec";
+javascript: void (function M(BAKED) {
+  var HUB_URL = "https://netherdragon99.github.io/formautofill/form.html";
   var ID = "sm_all_modal";
   var DEF_SITE = "labeling.robot.car";
 
@@ -173,48 +173,7 @@ javascript:(function M(BAKED) {
 
     var pageCfg = parsePageForm();
 
-    // 6. نظام المصادقة الهجين والمتنقل (Hybrid Auth)
-    function okAuth(a) {
-      return a && typeof a === "object" && a.user && (a.pass || a.token);
-    }
-
-    var auth = null;
-    if (typeof BAKED !== "undefined" && okAuth(BAKED)) {
-      auth = { user: BAKED.user, pass: BAKED.pass, token: BAKED.token, baked: true };
-    }
-    if (!okAuth(auth)) auth = jp(store.get("sm_auth"), null);
-    if (!okAuth(auth)) {
-      try { auth = jp(window.sessionStorage.getItem("sm_global_auth"), null); } catch (e) { auth = null; }
-    }
-    if (!okAuth(auth)) {
-      try {
-        var wn = jp(window.name, null);
-        if (okAuth(wn)) auth = wn;
-      } catch (e) { }
-    }
-    if (!okAuth(auth)) auth = null;
-
-    function saveAuth() {
-      if (!auth) return;
-      var s = JSON.stringify({ user: auth.user, pass: auth.pass, token: auth.token });
-      store.set("sm_auth", s);
-      try { window.sessionStorage.setItem("sm_global_auth", s); } catch (e) { }
-      try { window.name = s; } catch (e) { }
-    }
-
-    function clearAuth() {
-      store.rm("sm_auth");
-      try { window.sessionStorage.removeItem("sm_global_auth"); } catch (e) { }
-      try {
-        var curWn = jp(window.name, null);
-        if (curWn && curWn.user) window.name = "";
-      } catch (e) { }
-      auth = null;
-    }
-
-    if (auth) saveAuth();
-
-    // 7. تحميل الإعدادات المحلية والمزامنة مع صفحة الفورم إن وُجدت
+    // 6. تحميل الإعدادات المحلية وبذور النسخة المحمولة (BAKED)
     var cfg = normalizeCfg(jp(store.get("sm_form_cfg"), null));
     var vals = jp(store.get("sm_form_vals"), {});
     if (!vals || typeof vals !== "object" || Array.isArray(vals)) vals = {};
@@ -222,22 +181,6 @@ javascript:(function M(BAKED) {
     if (vals.openMode !== "window" && vals.openMode !== "tab") vals.openMode = "tab";
 
     var localRev = store.get("sm_rev") || vals._rev || "";
-
-    if (isForm && pageCfg && (!cfg.url || cfg.id !== pageCfg.id)) {
-      cfg = normalizeCfg(pageCfg);
-      vals = {
-        autoOpen: vals.autoOpen,
-        openMode: vals.openMode,
-        _formCount: vals._formCount || 0,
-        _countResetTs: vals._countResetTs || 0,
-        _allowedSites: vals._allowedSites
-      };
-      if (detEmail) vals.email = detEmail;
-      localRev = genRev();
-      store.set("sm_form_vals", JSON.stringify(vals));
-      store.set("sm_form_cfg", JSON.stringify(cfg));
-      store.set("sm_rev", localRev);
-    }
 
     if (!localRev && cfg.url) {
       localRev = genRev();
@@ -278,21 +221,36 @@ javascript:(function M(BAKED) {
       if (cfg && cfg.url) store.set("sm_form_cfg", JSON.stringify(cfg));
     }
 
-    // 8. التعرف على بيئة العمل (Gulp / Webviz / Segment ID)
+    if (typeof BAKED !== "undefined" && BAKED && typeof BAKED === "object" && BAKED.cfg && BAKED.cfg.url && (!cfg || !cfg.url)) {
+      cfg = normalizeCfg(BAKED.cfg);
+      if (BAKED.vals && typeof BAKED.vals === "object") vals = BAKED.vals;
+      if (vals.autoOpen === undefined) vals.autoOpen = false;
+      if (vals.openMode !== "window" && vals.openMode !== "tab") vals.openMode = "tab";
+      if (typeof BAKED.count === "number") formCount = BAKED.count;
+      if (BAKED.rev) localRev = BAKED.rev;
+      if (BAKED.ts) store.set("sm_sync_ts", String(BAKED.ts));
+      countResetTs = vals._countResetTs || 0;
+      if (Array.isArray(vals._allowedSites)) {
+        allowedSites = vals._allowedSites;
+        if (!store.get("sm_def_removed") && allowedSites.indexOf(DEF_SITE) < 0) allowedSites.unshift(DEF_SITE);
+      }
+      persist(false);
+    }
+
+    // 7. التعرف على بيئة العمل (Gulp / Webviz / Segment ID)
     var webvizEl = document.querySelector('a[href*="webviz.robot.car"]');
     var descEl = document.querySelector(".node-description");
     var isGulp = Boolean(webvizEl || descEl);
     var autoWebviz = webvizEl ? webvizEl.href : "";
     var autoGulp = isGulp ? window.location.href : "";
     var autoSeg = descEl ? descEl.textContent.split("|")[0].trim() : "";
-    var hasSel = String(window.getSelection ? window.getSelection() : "").trim().length > 0;
 
     var now = Date.now();
     var lastRun = parseInt(store.get("sm_last_run") || "0", 10);
-    var isDbl = (now - lastRun) < 1500;
-    store.set("sm_last_run", String(now));
+    var isDbl = (now - lastRun) > 0 && (now - lastRun) < 800;
+    store.set("sm_last_run", isDbl ? "0" : String(now));
 
-    // 9. توليد رابط فتح الفورم وتعبئته التلقائية
+    // 8. توليد رابط فتح الفورم وتعبئته التلقائية
     function launchUrl(v) {
       if (!cfg || !cfg.url) return null;
       var ps = new URLSearchParams();
@@ -300,10 +258,8 @@ javascript:(function M(BAKED) {
 
       cfg.fields.forEach(function (f) {
         var val = v[f.id];
-        if (!val) {
-          var sk = Object.keys(cfg.mapping).filter(function (k) { return cfg.mapping[k] === f.id; })[0];
-          if (sk) val = v[sk];
-        }
+        var sk = Object.keys(cfg.mapping).filter(function (k) { return cfg.mapping[k] === f.id; })[0];
+        if (!val && sk) val = v[sk];
         if (isGulp && !isForm) {
           if (sk === "gulp" && autoGulp) val = autoGulp;
           else if (sk === "webviz" && autoWebviz) val = autoWebviz;
@@ -328,92 +284,32 @@ javascript:(function M(BAKED) {
       try {
         if (v.openMode === "window") {
           var w = 480, h = 740;
-          var l = Math.max(0, (window.screen.availWidth || 1024) - w - 20);
+          var screenW = (window.screen && window.screen.availWidth) || 1024;
+          var l = Math.max(0, screenW - w - 20);
           win = window.open(u, "_blank", "width=" + w + ",height=" + h + ",left=" + l + ",top=40,menubar=no,toolbar=no,status=no");
+          if (!win) {
+            win = window.open(u, "_blank");
+          }
         } else {
           win = window.open(u, "_blank");
         }
       } catch (e) {
-        win = null;
+        try {
+          win = window.open(u, "_blank");
+        } catch (e2) {
+          win = null;
+        }
+      }
+      if (!win) {
+        try {
+          window.location.href = u;
+          win = true;
+        } catch (e3) { }
       }
       return Boolean(win);
     }
 
-    // 10. محرك الاتصال بالسحابة (API Call with Multi-Fallback)
-    var netBlocked = false;
-
-    function apiCall(action, u, p, extra, cb) {
-      var done = !1;
-      function fin(r) {
-        if (done) return;
-        done = true;
-        clearTimeout(tm);
-        if (cb) cb(r);
-      }
-
-      var tm = setTimeout(function () {
-        fin({ status: "error", msg: "Timeout" });
-      }, 10000);
-
-      var payload = { user: u || "" };
-      if (p) payload.pass = p;
-      else if (auth && auth.token) payload.token = auth.token;
-      if (detEmail) payload.email = detEmail;
-
-      if (extra) {
-        Object.keys(extra).forEach(function (k) {
-          payload[k] = extra[k];
-        });
-      }
-
-      var body = JSON.stringify(payload);
-
-      // المسار 1: POST طلب مباشر
-      fetch(API + "?action=" + encodeURIComponent(action) + "&_t=" + Date.now(), {
-        method: "POST",
-        headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: body
-      })
-      .then(function (r) {
-        netBlocked = false;
-        return r.json();
-      })
-      .then(fin)
-      .catch(function () {
-        // المسار 2: GET query fallback
-        var q = API + "?action=" + encodeURIComponent(action) + "&data=" + encodeURIComponent(body) + "&_t=" + Date.now();
-        function failFallback() {
-          netBlocked = true;
-          if (action === "save" && q.length <= 7800) {
-            var pw = null;
-            try {
-              pw = window.open(q, "_blank", "width=420,height=260");
-            } catch (e) { }
-            if (pw) {
-              setTimeout(function () {
-                try { pw.close(); } catch (e) { }
-              }, 3500);
-              return fin({ status: "ok", popup: true });
-            }
-          }
-          fin({ status: "error", msg: "Network/CORS blocked by this site" });
-        }
-
-        if (q.length > 7500) {
-          failFallback();
-        } else {
-          fetch(q)
-            .then(function (r) {
-              netBlocked = false;
-              return r.json();
-            })
-            .then(fin)
-            .catch(failFallback);
-        }
-      });
-    }
-
-    // 11. المزامنة والتحقق من التضارب (Sync & Conflict Detection)
+    // 9. المزامنة والتحقق من التضارب عبر Storage Hub (Cross-Origin Hub)
     function hasCloudDiff(d) {
       if (!d || !d.cfg || !d.cfg.url) return false;
       if (!cfg || !cfg.url) return true;
@@ -446,12 +342,18 @@ javascript:(function M(BAKED) {
         if (!vals.openMode) vals.openMode = "tab";
       }
 
-      // الاتفاق في جلسة الأسئلة: عند تنزيل السحابة يأخذ عداد السحابة بدقة
       var srvCount = (typeof d.count === "number") ? d.count : (d.vals && typeof d.vals._formCount === "number" ? d.vals._formCount : null);
       if (srvCount !== null) {
         formCount = srvCount;
         vals._formCount = formCount;
         store.set("sm_form_count", String(formCount));
+      }
+
+      var cReset = (typeof d.countResetTs === "number") ? d.countResetTs : (d.vals && typeof d.vals._countResetTs === "number" ? d.vals._countResetTs : null);
+      if (cReset !== null) {
+        countResetTs = cReset;
+        vals._countResetTs = countResetTs;
+        store.set("sm_count_reset_ts", String(countResetTs));
       }
 
       var cRev = d.rev || (d.vals && d.vals._rev) || genRev();
@@ -463,74 +365,193 @@ javascript:(function M(BAKED) {
       return true;
     }
 
-    function pushCloud(cb) {
-      if (!auth) {
-        if (cb) cb(false, "not logged in");
-        return;
+    function hubCall(action, payload, cb) {
+      var done = false;
+      var sent = false;
+      var pop = null;
+
+      function closePop() {
+        try { if (pop) pop.close(); } catch (e) { }
       }
+
+      function onMsg(ev) {
+        if (!ev || !ev.data || ev.data.app !== "sm_form_hub") return;
+        var act = ev.data.action;
+
+        if (act === "READY") {
+          if (sent) return;
+          sent = true;
+          if (action === "save") {
+            pop.postMessage({ app: "sm_form_hub", action: "SET", payload: payload }, "*");
+          } else if (action === "sync_count") {
+            pop.postMessage({ app: "sm_form_hub", action: "SYNC_COUNT", payload: payload }, "*");
+          } else {
+            pop.postMessage({ app: "sm_form_hub", action: "GET" }, "*");
+          }
+        } else if (act === "SAVED") {
+          closePop();
+          fin({ status: "ok", data: ev.data.data || payload });
+        } else if (act === "RESPONSE") {
+          var d = ev.data.data;
+          if (action === "auto_sync") {
+            var myTs = (payload && payload.ts) || 0;
+            if (d && d.cfg && d.cfg.url && d.rev !== localRev && (d.ts || 0) >= myTs) {
+              applyCloudData(d);
+              formCount++;
+              persist(false);
+              var nextPayload = {
+                ts: parseInt(store.get("sm_sync_ts") || "0", 10) || Date.now(),
+                rev: localRev,
+                count: formCount,
+                countResetTs: countResetTs,
+                cfg: (cfg && cfg.url) ? cfg : null,
+                vals: vals
+              };
+              pop.postMessage({ app: "sm_form_hub", action: "SET", payload: nextPayload }, "*");
+            } else {
+              if (d && typeof d.count === "number") {
+                var sRst = (d.vals && d.vals._countResetTs) || d.countResetTs || 0;
+                if (sRst > countResetTs) {
+                  countResetTs = sRst;
+                  formCount = d.count + 1;
+                } else if (sRst === countResetTs && d.count >= formCount) {
+                  formCount = d.count + 1;
+                }
+              }
+              persist(false);
+              var syncPayload = {
+                ts: (d && d.ts && d.ts > myTs) ? d.ts : (myTs || Date.now()),
+                rev: localRev,
+                count: formCount,
+                countResetTs: countResetTs,
+                cfg: (cfg && cfg.url) ? cfg : (d && d.cfg || null),
+                vals: vals
+              };
+              pop.postMessage({ app: "sm_form_hub", action: "SET", payload: syncPayload }, "*");
+            }
+            return;
+          }
+
+          closePop();
+          if (action === "ping") {
+            fin({
+              status: "ok",
+              upToDate: Boolean(!d || !d.cfg || !d.cfg.url || d.rev === localRev),
+              count: (d && typeof d.count === "number") ? d.count : formCount,
+              data: d
+            });
+          } else {
+            fin({ status: "ok", data: d });
+          }
+        }
+      }
+
+      function fin(res) {
+        if (done) return;
+        done = true;
+        clearTimeout(tm);
+        try { window.removeEventListener("message", onMsg); } catch (e) { }
+        if (cb) cb(res);
+      }
+
+      var tm = setTimeout(function () {
+        closePop();
+        fin({ status: "error", msg: "Timeout" });
+      }, 8000);
+
+      try {
+        window.addEventListener("message", onMsg);
+        pop = window.open(HUB_URL, "sm_hub", "width=10,height=10,left=-9999,top=-9999");
+        if (!pop) {
+          fin({ status: "error", msg: "Popup blocked by browser" });
+        }
+      } catch (e) {
+        fin({ status: "error", msg: "Popup blocked by browser" });
+      }
+    }
+
+    function pushHub(cb) {
       persist(false);
       var ts = parseInt(store.get("sm_sync_ts") || "0", 10) || Date.now();
       store.set("sm_sync_ts", String(ts));
 
-      apiCall("save", auth.user, auth.pass, {
+      hubCall("save", {
         ts: ts,
         rev: localRev,
         count: formCount,
-        cfg: cfg.url ? cfg : null,
-        vals: netBlocked ? undefined : vals
+        countResetTs: countResetTs,
+        cfg: (cfg && cfg.url) ? cfg : null,
+        vals: vals
       }, function (r) {
         var ok = Boolean(r && r.status === "ok");
-        if (cb) cb(ok, ok ? (r.popup ? "popup" : "") : (r && r.msg || "Failed"));
+        if (ok && r.data) {
+          if (r.data.ts) store.set("sm_sync_ts", String(r.data.ts));
+          if (r.data.rev) {
+            localRev = r.data.rev;
+            store.set("sm_rev", localRev);
+          }
+        }
+        if (cb) cb(ok, ok ? "ok" : (r && r.msg || "Failed"));
       });
     }
 
-    // فحص السحابة بالخلفية
-    function bgCheckCloud(onResult) {
-      if (!auth) {
-        if (onResult) onResult(false, false, false);
-        return;
-      }
-
-      apiCall("ping", auth.user, auth.pass, {
-        rev: localRev,
-        count: formCount,
-        countResetTs: countResetTs,
-        ts: parseInt(store.get("sm_sync_ts") || "0", 10) || 0
-      }, function (r) {
-        if (r && r.status === "ok") {
-          if (r.upToDate === true) {
-            if (onResult) onResult(true, false, false);
-            return;
-          }
-          if (r.data && hasCloudDiff(r.data)) {
-            pendingUpdate = r.data;
-            if (onResult) onResult(true, false, true);
-            return;
-          }
+    // فحص الـ Hub بالخلفية
+    function bgCheckHub(onResult) {
+      function resolveCloudDiff(d) {
+        if (!d || !hasCloudDiff(d)) {
           if (onResult) onResult(true, false, false);
           return;
         }
+        if (!cfg || !cfg.url) {
+          applyCloudData(d);
+          pendingUpdate = null;
+          if (onResult) onResult(true, true, false);
+          return;
+        }
+        var cTs = d.ts || 0;
+        var lTs = parseInt(store.get("sm_sync_ts") || "0", 10) || 0;
+        if (cTs > lTs && lTs > 0) {
+          applyCloudData(d);
+          pendingUpdate = null;
+          if (onResult) onResult(true, true, false);
+          return;
+        }
+        if (lTs > cTs && cTs > 0) {
+          pendingUpdate = d;
+          if (onResult) onResult(true, false, true);
+          return;
+        }
+        pendingUpdate = d;
+        if (onResult) onResult(true, false, true);
+      }
 
-        // في حال فشل ping نجرب load
-        apiCall("load", auth.user, auth.pass, null, function (r2) {
-          if (r2 && r2.status === "ok" && r2.data) {
-            if (hasCloudDiff(r2.data)) {
-              pendingUpdate = r2.data;
-              if (onResult) onResult(true, false, true);
-              return;
+      hubCall("ping", null, function (r) {
+        if (r && r.status === "ok") {
+          if (r.upToDate === true) {
+            var d = r.data;
+            var sResetTs = (d && d.vals && d.vals._countResetTs) || (d && d.countResetTs) || 0;
+            var srvCnt = (typeof r.count === "number") ? r.count : formCount;
+            var cntChanged = false;
+            if (sResetTs > countResetTs) {
+              countResetTs = sResetTs;
+              formCount = srvCnt;
+              cntChanged = true;
+            } else if (sResetTs === countResetTs && srvCnt > formCount) {
+              formCount = srvCnt;
+              cntChanged = true;
             }
-            if (onResult) onResult(true, false, false);
-          } else {
-            if (r2 && r2.msg === "Invalid session" && !auth.baked) {
-              clearAuth();
-            }
-            if (onResult) onResult(false, false, false);
+            if (cntChanged) persist(false);
+            if (onResult) onResult(true, cntChanged, false);
+            return;
           }
-        });
+          resolveCloudDiff(r.data);
+          return;
+        }
+        if (onResult) onResult(false, false, false);
       });
     }
 
-    // 12. محرك بناء عناصر واجهة المستخدم (DOM Builder Helper)
+    // 10. محرك بناء عناصر واجهة المستخدم (DOM Builder Helper)
     function mk(tag, props, kids) {
       var el = document.createElement(tag);
       var after = null;
@@ -563,7 +584,7 @@ javascript:(function M(BAKED) {
 
     var uiRefs = {};
 
-    // 13. بناء واجهة المستخدم الكاملة (Catppuccin Macchiato Theme)
+    // 11. بناء واجهة المستخدم الكاملة (Catppuccin Macchiato Theme)
     function renderUI(customNotice) {
       var existing = document.getElementById(ID);
       if (existing) existing.remove();
@@ -579,13 +600,13 @@ javascript:(function M(BAKED) {
 
       // CSS Stylesheet
       box.appendChild(mk("style", {
-        text: "#sm_all_modal *{box-sizing:border-box;font-family:inherit;}#sm_all_modal select,#sm_all_modal input[type=text],#sm_all_modal input[type=password],#sm_all_modal input[type=number],#sm_all_modal input[type=date],#sm_all_modal input[type=time],#sm_all_modal textarea{display:block;width:100%;padding:8px;background:#11111b;color:#cdd6f4;border:1px solid #45475a;border-radius:6px;font-size:12px;outline:none;transition:border-color .2s;}#sm_all_modal select:focus,#sm_all_modal input:focus,#sm_all_modal textarea:focus{border-color:#89b4fa;}#sm_all_modal textarea{resize:vertical;min-height:42px;max-height:240px;}#sm_all_modal label.sm_lbl{display:block;font-size:11px;color:#a6adc8;margin-bottom:6px;font-weight:600;}#sm_all_modal .sm_row{margin-bottom:12px;}#sm_all_modal .sm_row:last-child{margin-bottom:0;}#sm_all_modal .sm_btn{padding:10px;border:none;border-radius:6px;font-weight:600;cursor:pointer;font-size:12px;transition:opacity .15s;}#sm_all_modal .sm_btn:hover{opacity:.9;}#sm_all_modal .sm_btn:disabled{opacity:.5;cursor:not-allowed;}#sm_all_modal input[type=checkbox],#sm_all_modal input[type=radio]{-webkit-appearance:auto!important;appearance:auto!important;width:14px!important;height:14px!important;margin:0 4px 0 0!important;padding:0!important;display:inline-block!important;}#sm_all_modal .sm_scroll{scrollbar-width:thin;scrollbar-color:#45475a #181825;}#sm_all_modal ::-webkit-scrollbar{width:7px;height:7px;}#sm_all_modal ::-webkit-scrollbar-track{background:#181825;border-radius:4px;}#sm_all_modal ::-webkit-scrollbar-thumb{background:#45475a;border-radius:4px;}#sm_all_modal ::-webkit-scrollbar-thumb:hover{background:#89b4fa;}#sm_all_modal .sm_rz{position:absolute;bottom:0;right:0;width:0;height:0;border-style:solid;border-width:0 0 14px 14px;border-color:transparent transparent #89b4fa transparent;pointer-events:none;}"
+        text: "#sm_all_modal *{box-sizing:border-box;font-family:inherit;}#sm_all_modal select,#sm_all_modal input[type=text],#sm_all_modal input[type=number],#sm_all_modal input[type=date],#sm_all_modal input[type=time],#sm_all_modal textarea{display:block;width:100%;padding:8px;background:#11111b;color:#cdd6f4;border:1px solid #45475a;border-radius:6px;font-size:12px;outline:none;transition:border-color .2s;}#sm_all_modal select:focus,#sm_all_modal input:focus,#sm_all_modal textarea:focus{border-color:#89b4fa;}#sm_all_modal textarea{resize:vertical;min-height:42px;max-height:240px;}#sm_all_modal label.sm_lbl{display:block;font-size:11px;color:#a6adc8;margin-bottom:6px;font-weight:600;}#sm_all_modal .sm_row{margin-bottom:12px;}#sm_all_modal .sm_row:last-child{margin-bottom:0;}#sm_all_modal .sm_btn{padding:10px;border:none;border-radius:6px;font-weight:600;cursor:pointer;font-size:12px;transition:opacity .15s;}#sm_all_modal .sm_btn:hover{opacity:.9;}#sm_all_modal .sm_btn:disabled{opacity:.5;cursor:not-allowed;}#sm_all_modal input[type=checkbox],#sm_all_modal input[type=radio]{-webkit-appearance:auto!important;appearance:auto!important;width:14px!important;height:14px!important;margin:0 4px 0 0!important;padding:0!important;display:inline-block!important;}#sm_all_modal .sm_scroll{scrollbar-width:thin;scrollbar-color:#45475a #181825;}#sm_all_modal ::-webkit-scrollbar{width:7px;height:7px;}#sm_all_modal ::-webkit-scrollbar-track{background:#181825;border-radius:4px;}#sm_all_modal ::-webkit-scrollbar-thumb{background:#45475a;border-radius:4px;}#sm_all_modal ::-webkit-scrollbar-thumb:hover{background:#89b4fa;}#sm_all_modal .sm_rz{position:absolute;bottom:0;right:0;width:0;height:0;border-style:solid;border-width:0 0 14px 14px;border-color:transparent transparent #89b4fa transparent;pointer-events:none;}"
       }));
 
       // Header Elements
       var syncEl = mk("span", {
         style: "font-size:10px;color:#a6adc8;font-weight:500;margin-left:6px;",
-        text: auth ? "⚡ Ready " + (localRev ? "(#" + localRev + ")" : "") : "⚡ Local only"
+        text: "⚡ Hub Ready " + (localRev ? "(#" + localRev + ")" : "")
       });
 
       var countEl = mk("span", {
@@ -633,7 +654,7 @@ javascript:(function M(BAKED) {
             formCount = nv;
             countResetTs = Date.now();
             persist(false);
-            if (auth) pushCloud();
+            pushHub();
           }
           cls();
         };
@@ -662,7 +683,7 @@ javascript:(function M(BAKED) {
           formCount = 0;
           countResetTs = Date.now();
           persist(false);
-          if (auth) pushCloud();
+          pushHub();
           cls();
         };
         nB.onclick = cls;
@@ -758,7 +779,7 @@ javascript:(function M(BAKED) {
         var diffForm = Boolean(isForm && pageCfg && hasForm && (cfg.id !== pageCfg.id || cfg.url !== pageCfg.url));
         var unlinked = Boolean(isForm && pageCfg && !hasForm);
 
-        // 14. بانر التعارض والتحديث السحابي (Conflict Resolution Banner)
+        // 12. بانر التعارض والتحديث من الـ Hub (Conflict Resolution Banner)
         if (pendingUpdate) {
           var upRev = pendingUpdate.rev || (pendingUpdate.vals && pendingUpdate.vals._rev) || "new";
           var upTitle = (pendingUpdate.cfg && pendingUpdate.cfg.title) ? pendingUpdate.cfg.title : "Form Settings";
@@ -767,36 +788,34 @@ javascript:(function M(BAKED) {
           var upBar = mk("div", {
             style: "background:#1e1e2e;border:1px solid #f9e2af;border-left:4px solid #f9e2af;padding:10px 12px;border-radius:8px;margin-bottom:12px;"
           }, [
-            mk("div", { style: "color:#f9e2af;font-weight:700;font-size:11px;margin-bottom:6px;", text: "🔔 Cloud Update Available (#" + upRev + " - " + upTitle + ")" }),
-            mk("div", { style: "color:#cdd6f4;font-size:10px;margin-bottom:8px;", text: "Cloud has a different revision or newer form. Download cloud data or upload local?" }),
+            mk("div", { style: "color:#f9e2af;font-weight:700;font-size:11px;margin-bottom:6px;", text: "🔔 Hub Update Available (#" + upRev + " - " + upTitle + ")" }),
+            mk("div", { style: "color:#cdd6f4;font-size:10px;margin-bottom:8px;", text: "Storage Hub has a different revision or form. Download Hub data or upload local?" }),
             mk("div", { style: "display:flex;gap:6px;" }, [
-              // زر تنزيل السحابة
+              // زر تنزيل من الـ Hub
               mk("button", {
                 style: "flex:1;background:#a6e3a1;color:#11111b;border:none;border-radius:4px;padding:6px;font-size:11px;font-weight:700;cursor:pointer;",
-                text: "⬇️ Apply Cloud",
-                title: "Download and use cloud form and count (" + upCount + ")",
+                text: "⬇️ Apply Hub",
+                title: "Download and use Hub form and count (" + upCount + ")",
                 onclick: function () {
                   applyCloudData(pendingUpdate);
                   pendingUpdate = null;
                   countEl.textContent = "📊 Forms: " + formCount;
                   syncEl.textContent = "✔ Updated (#" + localRev + ")";
                   build();
-                  say("✔ Cloud update applied!", "#a6e3a1", true);
+                  say("✔ Hub update applied!", "#a6e3a1", true);
                 }
               }),
-              // زر رفع النسخة المحلية
+              // زر رفع النسخة المحلية للـ Hub
               mk("button", {
                 style: "flex:1;background:#89b4fa;color:#11111b;border:none;border-radius:4px;padding:6px;font-size:11px;font-weight:700;cursor:pointer;",
                 text: "⬆️ Keep Local",
-                title: "Upload your current local data and count to cloud",
+                title: "Upload your current local data and count to Storage Hub",
                 onclick: function () {
                   pendingUpdate = null;
                   persist(true);
-                  if (auth) {
-                    pushCloud(function (ok) {
-                      if (ok) say("✔ Local version uploaded to cloud!", "#a6e3a1", true);
-                    });
-                  }
+                  pushHub(function (ok) {
+                    if (ok) say("✔ Local version synced to Hub!", "#a6e3a1", true);
+                  });
                   syncEl.textContent = "✔ Synced (#" + localRev + ")";
                   build();
                 }
@@ -825,159 +844,67 @@ javascript:(function M(BAKED) {
           mk("div", { style: "color:#a6adc8;font-size:10px;word-break:break-all;", text: "URL: " + (cur.url || "Please link a form first.") })
         ]));
 
-        // Auth Section
-        var ab = mk("div", { style: "background:#11111b;padding:10px 12px;border-radius:8px;margin-bottom:10px;border:1px solid #313244;" });
-        if (auth) {
-          var bt = mk("button", {
-            style: "background:#313244;border:1px solid #a6e3a1;color:#a6e3a1;border-radius:4px;padding:4px 8px;font-size:10px;font-weight:700;cursor:pointer;",
-            text: "📌 Portable",
-            title: "Copies a self-contained bookmarklet with your login inside"
+        // Storage Hub Sync Bar
+        var hubBar = mk("div", { style: "background:#11111b;padding:10px 12px;border-radius:8px;margin-bottom:10px;border:1px solid #313244;" });
+        var bt = mk("button", {
+          style: "background:#313244;border:1px solid #a6e3a1;color:#a6e3a1;border-radius:4px;padding:4px 8px;font-size:10px;font-weight:700;cursor:pointer;",
+          text: "📌 Portable",
+          title: "Copies a self-contained bookmarklet with a snapshot of your current form settings"
+        });
+
+        bt.onclick = function () {
+          var cr = JSON.stringify({
+            cfg: (cfg && cfg.url) ? cfg : null,
+            vals: vals,
+            count: formCount,
+            rev: localRev,
+            ts: parseInt(store.get("sm_sync_ts") || "0", 10) || 0
+          })
+            .replace(/\x25/g, "\\u0025")
+            .replace(/</g, "\\u003c");
+
+          var portCode = "javascript:void (" + M.toString() + ")(" + cr + ");";
+
+          copyText(portCode, function (ok) {
+            bt.textContent = ok ? "✔ Copied!" : "❌ Failed";
+            setTimeout(function () { bt.textContent = "📌 Portable"; }, 3000);
           });
+        };
 
-          bt.onclick = function () {
-            var cr = JSON.stringify(auth.pass ? { user: auth.user, pass: auth.pass } : { user: auth.user, token: auth.token })
-              .replace(/\x25/g, "\\u0025")
-              .replace(/</g, "\\u003c");
+        var sb = mk("button", {
+          style: "background:#313244;border:1px solid #45475a;color:#89b4fa;border-radius:4px;padding:4px 8px;font-size:10px;font-weight:700;cursor:pointer;",
+          text: "🔄 Sync Hub"
+        });
 
-            var fnBody = M.toString();
-            var portCode = "javascript:(function M(BAKED){" + fnBody.match(/\{([\s\S]*)\}/)[1] + "})(" + cr + ");";
-
-            copyText(portCode, function (ok) {
-              bt.textContent = ok ? "✔ Copied!" : "❌ Failed";
-              setTimeout(function () { bt.textContent = "📌 Portable"; }, 3000);
-            });
-          };
-
-          var sb = mk("button", {
-            style: "background:#313244;border:1px solid #45475a;color:#89b4fa;border-radius:4px;padding:4px 8px;font-size:10px;font-weight:700;cursor:pointer;",
-            text: "☁️ Sync"
-          });
-
-          sb.onclick = function () {
-            if (sb.disabled) return;
-            sb.disabled = true;
-            sb.textContent = "⏳...";
-            apiCall("load", auth.user, auth.pass, null, function (r) {
-              sb.disabled = false;
-              sb.textContent = "☁️ Sync";
-              if (r && r.status === "ok" && r.data) {
-                applyCloudData(r.data);
-                pendingUpdate = null;
-                countEl.textContent = "📊 Forms: " + formCount;
-                syncEl.textContent = "✔ Synced (#" + localRev + ")";
-                build();
-                say("✔ Synced from cloud!", "#a6e3a1", true);
-              } else {
-                say("⚠️ Sync failed: " + (r && r.msg || "Error"), "#f38ba8", true);
-              }
-            });
-          };
-
-          var sw = mk("button", {
-            style: "background:#313244;border:1px solid #f38ba8;color:#f38ba8;border-radius:4px;padding:4px 8px;font-size:10px;font-weight:700;cursor:pointer;",
-            text: "🔄 Switch"
-          });
-
-          sw.onclick = function () {
-            if (sw.dataset.c === "1") {
-              clearAuth();
-              ["sm_form_cfg", "sm_form_vals", "sm_form_count", "sm_sync_ts", "sm_rev"].forEach(function (k) {
-                store.rm(k);
-              });
-              cfg = emptyCfg();
-              formCount = 0;
-              localRev = "";
-              vals = { autoOpen: false, openMode: "tab", _formCount: 0 };
+        sb.onclick = function () {
+          if (sb.disabled) return;
+          sb.disabled = true;
+          sb.textContent = "⏳...";
+          hubCall("load", null, function (r) {
+            sb.disabled = false;
+            sb.textContent = "🔄 Sync Hub";
+            if (r && r.status === "ok" && r.data) {
+              applyCloudData(r.data);
               pendingUpdate = null;
-              syncEl.textContent = "⚡ Local only";
-              countEl.textContent = "📊 Forms: 0";
+              countEl.textContent = "📊 Forms: " + formCount;
+              syncEl.textContent = "✔ Synced (#" + localRev + ")";
               build();
+              say("✔ Synced from Storage Hub!", "#a6e3a1", true);
+            } else if (r && r.status === "ok") {
+              say("ℹ️ Storage Hub is empty. Click Save & Sync to push.", "#f9e2af", true);
             } else {
-              sw.dataset.c = "1";
-              sw.textContent = "Logout?";
-              setTimeout(function () {
-                if (sw) {
-                  sw.dataset.c = "0";
-                  sw.textContent = "🔄 Switch";
-                }
-              }, 2500);
+              say("⚠️ Hub sync failed: " + (r && r.msg || "Error"), "#f38ba8", true);
             }
-          };
+          });
+        };
 
-          ab.appendChild(mk("div", { style: "display:flex;justify-content:space-between;align-items:center;gap:6px;" }, [
-            mk("div", { style: "display:flex;align-items:center;gap:4px;overflow:hidden;" }, [
-              mk("span", { text: "👤" }),
-              mk("strong", { style: "font-size:12px;color:#cba6f7;text-overflow:ellipsis;overflow:hidden;white-space:nowrap;", text: auth.user })
-            ]),
-            mk("div", { style: "display:flex;gap:5px;flex-shrink:0;" }, [bt, sb, sw])
-          ]));
-        } else {
-          ab.style.borderColor = "#cba6f7";
-          var ui = mk("input", { type: "text", placeholder: "Username", style: "margin-bottom:6px;" });
-          var pi = mk("input", { type: "password", placeholder: "Password", style: "margin-bottom:8px;" });
-          var am = mk("div", { style: "font-size:10px;font-weight:600;margin-bottom:6px;display:none;" });
-
-          function amsg(t, c) {
-            am.textContent = t;
-            am.style.color = c || "#f38ba8";
-            am.style.display = "block";
-          }
-
-          var authBusy = false;
-          function doAuth(mode) {
-            if (authBusy) return;
-            var u = ui.value.trim().toLowerCase().replace(/[^a-z0-9_@.-]/g, "");
-            var p = pi.value;
-            if (!u || !p) return amsg("⚠️ Enter username and password.", "#f9e2af");
-
-            authBusy = true;
-            amsg(mode === "login" ? "⏳ Logging in..." : "⏳ Registering...", "#89b4fa");
-
-            var extra = mode === "register" ? {
-              ts: Date.now(),
-              rev: localRev || genRev(),
-              count: formCount,
-              cfg: hasForm ? cfg : null,
-              vals: vals
-            } : null;
-
-            apiCall(mode, u, p, extra, function (r) {
-              authBusy = false;
-              if (r && r.status === "ok") {
-                auth = { user: u, pass: p, token: r.token };
-                saveAuth();
-                if (r.data && (r.data.cfg || r.data.vals)) {
-                  applyCloudData(r.data);
-                } else if (hasForm) {
-                  pushCloud();
-                }
-                countEl.textContent = "📊 Forms: " + formCount;
-                syncEl.textContent = "✔ Synced (#" + localRev + ")";
-                build();
-              } else {
-                amsg("❌ " + (r && r.msg || "Failed"), "#f38ba8");
-              }
-            });
-          }
-
-          ab.appendChild(mk("div", { style: "color:#cba6f7;font-weight:700;font-size:11px;margin-bottom:6px;", text: "🔐 Login / Register" }));
-          ab.appendChild(ui);
-          ab.appendChild(pi);
-          ab.appendChild(am);
-          ab.appendChild(mk("div", { style: "display:flex;gap:6px;" }, [
-            mk("button", {
-              style: "flex:1;background:#89b4fa;color:#11111b;border:none;border-radius:4px;padding:6px;font-size:11px;font-weight:700;cursor:pointer;",
-              text: "🔑 Login",
-              onclick: function () { doAuth("login"); }
-            }),
-            mk("button", {
-              style: "flex:1;background:#cba6f7;color:#11111b;border:none;border-radius:4px;padding:6px;font-size:11px;font-weight:700;cursor:pointer;",
-              text: "✨ Register",
-              onclick: function () { doAuth("register"); }
-            })
-          ]));
-        }
-        content.appendChild(ab);
+        hubBar.appendChild(mk("div", { style: "display:flex;justify-content:space-between;align-items:center;gap:6px;" }, [
+          mk("div", { style: "display:flex;align-items:center;gap:5px;overflow:hidden;" }, [
+            mk("strong", { style: "font-size:11px;color:#cba6f7;text-overflow:ellipsis;overflow:hidden;white-space:nowrap;", text: "🌐 Cross-Site Hub Sync" })
+          ]),
+          mk("div", { style: "display:flex;gap:5px;flex-shrink:0;" }, [bt, sb])
+        ]));
+        content.appendChild(hubBar);
 
         // Relink / Change Form Banner
         var bn = mk("div", { style: "background:#11111b;padding:10px 12px;border-radius:8px;margin-bottom:14px;border:1px solid #313244;font-size:11px;" });
@@ -996,26 +923,24 @@ javascript:(function M(BAKED) {
             if (detEmail) vals.email = detEmail;
           }
           pendingUpdate = null;
-          store.set("sm_sync_ts", String(Date.now() + 5000));
           persist(true);
-          if (auth) pushCloud();
           syncEl.textContent = "✔ Linked (#" + localRev + ")";
           build();
-          say("✔ New form linked & old data cleared!", "#a6e3a1", true);
+          say("✔ Form linked locally! Click 💾 Save & Sync to push to Hub.", "#a6e3a1", true);
         }
 
         function showRelinkConfirm(promptText, btnLabel, borderColor) {
           bn.textContent = "";
           bn.style.borderColor = borderColor;
           var mainRow = mk("div", { style: "display:flex;justify-content:space-between;align-items:center;gap:8px;" }, [
-            mk("span", { style: "color:" + borderColor + ";font-weight:700;", text: promptText }),
+            mk("span", { style: "color:" + borderColor + ";font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:210px;", text: promptText, title: promptText }),
             mk("button", {
               style: "background:" + borderColor + ";color:#11111b;border:none;border-radius:4px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0;",
               text: btnLabel,
               onclick: function () {
                 bn.textContent = "";
                 bn.style.borderColor = "#f9e2af";
-                bn.appendChild(mk("div", { style: "color:#f9e2af;font-weight:700;margin-bottom:8px;font-size:11px;", text: "⚠️ Replace form and clear old data?" }));
+                bn.appendChild(mk("div", { style: "color:#f9e2af;font-weight:700;margin-bottom:8px;font-size:11px;", text: "⚠️ Replace '" + (cfg.title || "current form") + "' and reset answers?" }));
                 bn.appendChild(mk("div", { style: "display:flex;gap:6px;" }, [
                   mk("button", {
                     style: "flex:1;background:#a6e3a1;color:#11111b;border:none;border-radius:4px;padding:6px;font-size:11px;font-weight:700;cursor:pointer;",
@@ -1035,12 +960,15 @@ javascript:(function M(BAKED) {
         }
 
         if (diffForm) {
-          showRelinkConfirm("This page is a different form", "🔄 Update to this form", "#f9e2af");
+          showRelinkConfirm("⚠️ Different Form: " + (pageCfg.title || "New Form"), "🔗 Link this form", "#f9e2af");
+          content.appendChild(bn);
+        } else if (isForm && pageCfg && hasForm) {
+          showRelinkConfirm("✔ This form is linked", "🔄 Re-link (Reset Form)", "#a6e3a1");
           content.appendChild(bn);
         } else if (unlinked) {
-          bn.style.borderColor = "#f38ba8";
+          bn.style.borderColor = "#a6e3a1";
           bn.appendChild(mk("div", { style: "display:flex;justify-content:space-between;align-items:center;gap:8px;" }, [
-            mk("span", { style: "color:#f38ba8;font-weight:700;", text: "Form not linked yet" }),
+            mk("span", { style: "color:#a6e3a1;font-weight:700;", text: "Form detected: " + (pageCfg.title || "New Form") }),
             mk("button", {
               style: "background:#a6e3a1;color:#11111b;border:none;border-radius:4px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0;",
               text: "🔗 Link this form",
@@ -1056,7 +984,7 @@ javascript:(function M(BAKED) {
 
           cfg.fields.forEach(function (f) {
             var sk = Object.keys(cfg.mapping).filter(function (k) { return cfg.mapping[k] === f.id; })[0];
-            var val = sk ? (vals[sk] || vals[f.id] || "") : (vals[f.id] || "");
+            var val = (vals[f.id] !== undefined && vals[f.id] !== null && vals[f.id] !== "") ? vals[f.id] : (sk && vals[sk] || "");
             var isEnv = false;
 
             if (isGulp && !isForm) {
@@ -1157,6 +1085,7 @@ javascript:(function M(BAKED) {
                       if (s === DEF_SITE) store.set("sm_def_removed", "1");
                       allowedSites.splice(idx, 1);
                       persist(true);
+                      pushHub();
                       renderSites();
                     }
                   }),
@@ -1180,6 +1109,23 @@ javascript:(function M(BAKED) {
 
           sPanel.appendChild(listWrap);
 
+          var curDom = cleanDomain(location.host);
+          var canAddCur = curDom && curDom.indexOf(".") > -1 && allowedSites.indexOf(curDom) < 0 && !isForm;
+          if (canAddCur) {
+            sPanel.appendChild(mk("button", {
+              type: "button",
+              style: "width:100%;margin-bottom:8px;background:#313244;border:1px dashed #89b4fa;color:#89b4fa;border-radius:4px;padding:5px 8px;cursor:pointer;font-size:11px;font-weight:600;",
+              text: "➕ Add Current Site (" + curDom + ")",
+              onclick: function () {
+                if (curDom === DEF_SITE) store.rm("sm_def_removed");
+                allowedSites.push(curDom);
+                persist(true);
+                pushHub();
+                renderSites();
+              }
+            }));
+          }
+
           var dIn = mk("input", { type: "text", placeholder: "Add domain (e.g. site.com)", style: "flex:1;padding:5px 8px;font-size:11px;" });
           sPanel.appendChild(mk("div", { style: "display:flex;gap:6px;" }, [
             dIn,
@@ -1192,6 +1138,7 @@ javascript:(function M(BAKED) {
                   if (dom === DEF_SITE) store.rm("sm_def_removed");
                   allowedSites.push(dom);
                   persist(true);
+                  pushHub();
                   renderSites();
                 }
               }
@@ -1236,9 +1183,8 @@ javascript:(function M(BAKED) {
             cfg.fields.forEach(function (f) {
               var sk = Object.keys(cfg.mapping).filter(function (k) { return cfg.mapping[k] === f.id; })[0];
               if (inputs[f.id] && f.type !== 13) {
-                var v = inputs[f.id].value;
-                if (sk) vals[sk] = v;
-                vals[f.id] = v;
+                vals[f.id] = inputs[f.id].value;
+                if (sk) delete vals[sk];
               }
             });
           }
@@ -1273,7 +1219,7 @@ javascript:(function M(BAKED) {
           formCount++;
           persist(false);
           var opened = openForm(vals);
-          if (auth) pushCloud();
+          pushHub();
           if (opened) {
             box.remove();
           } else {
@@ -1287,32 +1233,29 @@ javascript:(function M(BAKED) {
       var saveBtn = mk("button", {
         className: "sm_btn",
         style: "flex:1.4;background:#89b4fa;color:#11111b;",
-        text: auth ? "💾 Save & Sync" : "💾 Save Locally"
+        text: "💾 Save & Sync"
       });
 
       saveBtn.onclick = function () {
         if (saveBtn.disabled) return;
         readAndSave(true);
-        syncEl.textContent = "⚡ Ready (#" + localRev + ")";
-
-        if (!auth) {
-          saveBtn.textContent = "✔ Saved Locally!";
-          saveBtn.style.background = "#a6e3a1";
-          setTimeout(function () { box.remove(); }, 500);
-          return;
-        }
+        syncEl.textContent = "⚡ Hub Ready (#" + localRev + ")";
 
         saveBtn.disabled = true;
         saveBtn.textContent = "⏳ Syncing...";
-        pushCloud(function (ok, msg) {
+        syncEl.textContent = "🔄 Syncing...";
+        pushHub(function (ok, msg) {
           saveBtn.disabled = false;
           if (ok) {
-            saveBtn.textContent = (msg === "popup") ? "✔ Sent via popup" : "✔ Saved & Synced!";
+            saveBtn.textContent = "✔ Saved & Synced!";
             saveBtn.style.background = "#a6e3a1";
-            setTimeout(function () { box.remove(); }, 500);
+            saveBtn.style.color = "#11111b";
+            syncEl.textContent = "✔ Synced (#" + localRev + ")";
+            say("✔ Saved locally and synced to Storage Hub!", "#a6e3a1", true);
+            setTimeout(function () { box.remove(); }, 800);
           } else {
             saveBtn.textContent = "💾 Save & Sync";
-            say("⚠️ Saved locally (#" + localRev + "), cloud sync failed: " + msg, "#f9e2af", false);
+            say("❌ Hub sync failed: " + msg + " (Saved locally)", "#f38ba8", false);
           }
         });
       };
@@ -1329,7 +1272,6 @@ javascript:(function M(BAKED) {
           ["sm_form_cfg", "sm_form_vals", "sm_allowed_sites", "sm_ui_pos", "sm_last_run", "sm_sync_ts", "sm_form_count", "sm_rev", "sm_def_removed", "sm_count_reset_ts"].forEach(function (k) {
             store.rm(k);
           });
-          clearAuth();
           formCount = 0;
           countResetTs = 0;
           localRev = "";
@@ -1337,7 +1279,7 @@ javascript:(function M(BAKED) {
           vals = { autoOpen: false, openMode: "tab", _formCount: 0 };
           allowedSites = [DEF_SITE];
           pendingUpdate = null;
-          syncEl.textContent = "⚡ Local only";
+          syncEl.textContent = "⚡ Hub Ready";
           countEl.textContent = "📊 Forms: 0";
           build();
           say("✔ All local data reset!", "#a6e3a1", true);
@@ -1378,62 +1320,79 @@ javascript:(function M(BAKED) {
       };
     }
 
-    // 15. دورة حياة التنفيذ (Fast Run vs Cold Start)
+    // 13. دورة حياة التنفيذ (Fast Run vs Cold Start)
+    function checkAllowedSite(host, sites) {
+      if (!host || !Array.isArray(sites)) return false;
+      var curHost = String(host).toLowerCase().replace(/^www\./, "");
+      return sites.some(function (raw) {
+        if (!raw) return false;
+        var s = String(raw).trim().toLowerCase().replace(/^(https?:\/\/)?(www\.)?/, "").split("/")[0].split("?")[0];
+        if (!s) return false;
+        return curHost === s || curHost.indexOf("." + s) > -1 || (curHost.indexOf(s) > -1 && s.indexOf(".") > -1);
+      });
+    }
+
+    var onAllowedSite = checkAllowedSite(location.host, allowedSites);
     var hasSavedLocal = Boolean(cfg && cfg.url && Array.isArray(cfg.fields) && cfg.fields.length > 0);
-    var onAllowedSite = allowedSites.some(function (s) { return location.host.indexOf(s) > -1; });
+    var shouldAutoOpen = !isForm && onAllowedSite && Boolean(vals.autoOpen) && !isDbl && hasSavedLocal;
 
-    // السيناريو أ: توجد داتا محلية أو نحن في صفحة فورم
-    if (hasSavedLocal || isForm) {
-      if (!isForm && onAllowedSite && vals.autoOpen && !hasSel && !isDbl && cfg.url) {
-        // الفتح التلقائي الفوري (0ms)
-        formCount++;
-        persist(false);
-        var okOpen = openForm(vals);
-        if (!okOpen) {
-          renderUI("⚠️ Browser blocked the automatic popup! Click '🚀 Open Now' below.");
-        }
-
-        // فحص السحابة بالخلفية: إذا وجد تحديث يفتح نافذة البوكمارك فوراً لتنبيهك!
-        if (auth) {
-          bgCheckCloud(function (ok, cntCh, hasUp) {
-            if (hasUp) {
-              renderUI();
-            } else if (ok) {
-              pushCloud();
-            }
-          });
-        }
-        return;
-      }
-
-      // إذا لم يكن Auto-Open: افتح الواجهة فوراً
-      renderUI();
-
-      if (auth) {
-        uiRefs.syncEl.textContent = "☁️ Checking #" + (localRev || "...") + "...";
-        bgCheckCloud(function (ok, cntCh, hasUp) {
-          if (!document.getElementById(ID)) {
-            // لو النافذة قُفلت ووُجد تحديث: افتحها فوراً كما طلبت
-            if (hasUp) renderUI();
-            return;
-          }
-          if (cntCh && uiRefs.countEl) {
-            uiRefs.countEl.textContent = "📊 Forms: " + formCount;
-          }
-          if (hasUp && uiRefs.build) {
-            uiRefs.syncEl.textContent = "🔔 Update found!";
-            uiRefs.build();
-          } else if (ok) {
-            uiRefs.syncEl.textContent = "✔ Up to date (#" + (localRev || "ok") + ")";
-          }
-        });
+    // السيناريو 1: الفتح التلقائي الفوري في المواقع المصرح بها
+    if (shouldAutoOpen) {
+      formCount++;
+      persist(false);
+      var okOpen = openForm(vals);
+      var mySyncTs = parseInt(store.get("sm_sync_ts") || "0", 10) || 0;
+      hubCall("auto_sync", {
+        ts: mySyncTs,
+        rev: localRev,
+        count: formCount,
+        countResetTs: countResetTs,
+        cfg: cfg,
+        vals: vals
+      });
+      if (!okOpen) {
+        renderUI("⚠️ Browser blocked the popup! Click '🚀 Open Now' below.");
       }
       return;
     }
 
-    // السيناريو ب: تشغيل على البارد (Cold Start on New Site - لا توجد داتا محلية)
+    // السيناريو 2: فتح واجهة الإعدادات (في المواقع غير المصرحة، أو عند النقر المزدوج للتعديل، أو في صفحة الفورم)
+    if (hasSavedLocal || isForm) {
+      renderUI();
+
+      var prevRev = localRev;
+      uiRefs.syncEl.textContent = "🔄 Checking Hub" + (localRev ? " (#" + localRev + ")" : "") + "...";
+      bgCheckHub(function (ok, cntCh, hasUp) {
+        if (!document.getElementById(ID)) {
+          if (hasUp && pendingUpdate) {
+            var cTs = pendingUpdate.ts || 0;
+            var myTs = parseInt(store.get("sm_sync_ts") || "0", 10) || 0;
+            if (cTs >= myTs) {
+              applyCloudData(pendingUpdate);
+            }
+          }
+          return;
+        }
+        if (cntCh && uiRefs.countEl) {
+          uiRefs.countEl.textContent = "📊 Forms: " + formCount;
+        }
+        if ((hasUp || localRev !== prevRev) && uiRefs.build) {
+          uiRefs.syncEl.textContent = hasUp ? "🔔 Update found!" : "✔ Synced (#" + (localRev || "ok") + ")";
+          uiRefs.build();
+        } else if (ok) {
+          uiRefs.syncEl.textContent = "✔ Up to date (#" + (localRev || "ok") + ")";
+        } else {
+          uiRefs.syncEl.textContent = "⚡ Hub Ready (Offline)";
+        }
+      });
+      return;
+    }
+
+    // السيناريو 3: تشغيل على البارد (Cold Start on New Site - لا توجد داتا محلية)
     var loadBox = (function () {
       var rawPos = jp(store.get("sm_ui_pos"), null) || { top: "16px", left: "auto", right: "16px", width: "395px", height: "auto" };
+      var vw = window.innerWidth || 1024;
+      var boxW = Math.min(Math.max(parseInt(rawPos.width, 10) || 395, 355), vw - 20);
       var box = mk("div", {
         id: ID,
         style: "position:fixed;top:" + rawPos.top + ";left:" + rawPos.left + ";right:" + rawPos.right + ";width:" + boxW + "px;height:160px;min-width:355px;background:#181825;color:#cdd6f4;border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.7);border:1px solid #313244;z-index:2147483647;font-family:system-ui,-apple-system,sans-serif;font-size:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;"
@@ -1446,7 +1405,7 @@ javascript:(function M(BAKED) {
       });
       var text = mk("div", {
         style: "color:#a6adc8;font-weight:600;font-size:12px;",
-        text: "⏳ Checking cloud profile..."
+        text: "⏳ Checking Storage Hub..."
       });
       box.appendChild(spinStyle);
       box.appendChild(spinner);
@@ -1461,14 +1420,14 @@ javascript:(function M(BAKED) {
       doneInit = true;
       if (loadBox) loadBox.remove();
 
-      // الاتفاق في جلسة الأسئلة: إذا نجح السحب وAuto-Open مفعل والموقع مصرح: يفتح فوراً
-      if (loaded && !isForm && onAllowedSite && vals.autoOpen && !hasSel && !isDbl && cfg.url) {
+      var onAllowed = checkAllowedSite(location.host, allowedSites);
+      if (loaded && !isForm && onAllowed && vals.autoOpen && !isDbl && cfg && cfg.url) {
         formCount++;
         persist(false);
         if (!openForm(vals)) {
           renderUI("⚠️ Popup blocked! Click '🚀 Open Now' below.");
-        } else if (auth) {
-          pushCloud();
+        } else {
+          hubCall("sync_count", { count: formCount, countResetTs: countResetTs });
         }
         return;
       }
@@ -1477,22 +1436,10 @@ javascript:(function M(BAKED) {
 
     setTimeout(function () { finishInit(false); }, 4000);
 
-    if (auth) {
-      apiCall("load", auth.user, auth.pass, null, function (r) {
-        var ok = Boolean(r && r.status === "ok" && r.data && applyCloudData(r.data));
-        finishInit(ok);
-      });
-    } else {
-      apiCall("probe", "", "", null, function (r) {
-        var ok = false;
-        if (r && r.status === "ok" && r.user && (r.token || r.pass)) {
-          auth = { user: r.user, token: r.token, pass: r.pass };
-          saveAuth();
-          if (r.data) ok = applyCloudData(r.data);
-        }
-        finishInit(ok);
-      });
-    }
+    hubCall("load", null, function (r) {
+      var ok = Boolean(r && r.status === "ok" && r.data && applyCloudData(r.data));
+      finishInit(ok);
+    });
 
   } catch (err) {
     var mEl = document.getElementById(ID);
